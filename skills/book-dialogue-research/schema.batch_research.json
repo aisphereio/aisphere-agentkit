@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "required": ["book_name", "batch_no", "chapter_range", "final_skills", "next_observation_targets"],
+  "properties": {
+    "book_name": {"type": "string"},
+    "batch_no": {"type": "integer"},
+    "chapter_range": {"type": "string"},
+    "chapter_count": {"type": "integer"},
+    "merged_micro_skill_count": {"type": "integer"},
+    "discarded_generic_skills": {"type": "array", "items": {"type": "string"}},
+    "core_scene_types": {"type": "array", "items": {"type": "string"}},
+    "final_skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "scene", "problem_it_solves", "operation_steps", "anti_pattern", "original_example", "portable_rule"],
+        "properties": {
+          "name": {"type": "string"},
+          "scene": {"type": "string"},
+          "problem_it_solves": {"type": "string"},
+          "principle": {"type": "string"},
+          "operation_steps": {"type": "array", "items": {"type": "string"}},
+          "anti_pattern": {"type": "string"},
+          "original_example": {"type": "string"},
+          "portable_rule": {"type": "string"}
+        }
+      }
+    },
+    "next_observation_targets": {"type": "array", "items": {"type": "string"}},
+    "artifact_refs": {"type": "object"}
+  }
+}

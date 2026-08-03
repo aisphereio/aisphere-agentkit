@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CrossChapterSkillCandidates",
+  "type": "object",
+  "required": [
+    "book_id",
+    "start_chapter",
+    "end_chapter",
+    "source_skill_packs",
+    "stable_techniques",
+    "human_review_required"
+  ],
+  "properties": {
+    "book_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "start_chapter": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "end_chapter": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_skill_packs": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "string"
+      }
+    },
+    "stable_techniques": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/techniqueCandidate"
+      }
+    },
+    "candidate_techniques": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/techniqueCandidate"
+      }
+    },
+    "rejected_overfit_details": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "upgrade_recommendations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_review_required": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "techniqueCandidate": {
+      "type": "object",
+      "required": [
+        "name",
+        "evidence_chapters",
+        "general_pattern",
+        "execution_steps",
+        "applicability",
+        "anti_overfit_rule",
+        "validation_status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skill_focus": {
+          "type": "string",
+          "description": "Technique focus area, for example dialogue, scene, plot, character, style."
+        },
+        "target_technique": {
+          "type": "string",
+          "description": "Single extraction target this candidate serves."
+        },
+        "abstraction_level": {
+          "type": "string",
+          "enum": [
+            "atomic_technique",
+            "module",
+            "framework"
+          ],
+          "description": "Recommended granularity for publishing as a skill."
+        },
+        "transfer_scope": {
+          "type": "string",
+          "description": "Genres/scenes where this technique can transfer without source setting."
+        },
+        "source_specific_details_rejected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Source-specific names, settings, plot details, and project traces explicitly rejected from runtime skill body."
+        },
+        "runtime_body_policy": {
+          "type": "string",
+          "enum": [
+            "source_free"
+          ],
+          "description": "Runtime SKILL.md body must not include source/project traces."
+        },
+        "evidence_policy": {
+          "type": "string",
+          "enum": [
+            "metadata_only"
+          ],
+          "description": "Evidence stays in metadata/evaluation/report, not runtime SKILL.md body."
+        },
+        "evidence_chapters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "general_pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_steps": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        "applicability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "anti_overfit_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validation_status": {
+          "type": "string",
+          "enum": [
+            "candidate",
+            "ready_for_review",
+            "needs_more_samples"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

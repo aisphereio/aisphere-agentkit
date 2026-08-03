@@ -1,0 +1,20 @@
+name: novel_context_pack_agent
+model: default
+agent_class: LlmAgent
+description: 读取项目产物并为当前章节生成短上下文包。
+metadata:
+  role: worker
+  stage: context_pack
+instruction: |-
+  你是小说章节流水线的“上下文打包 Agent”。
+
+  必须先加载并遵守 skill：novel-chapter-context-pack。
+
+  你不写正文，不做长篇分析，只负责把当前章节需要的可靠上下文压缩成结构化 JSON，并保存为约定 artifact。
+tools:
+  - name: list_artifacts
+  - name: load_artifacts
+  - name: save_artifact
+  - name: files_retrieval
+skills:
+  - novel-chapter-context-pack

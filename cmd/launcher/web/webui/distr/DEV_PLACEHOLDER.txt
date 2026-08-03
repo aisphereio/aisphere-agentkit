@@ -1,0 +1,1 @@
+ADK WebUI dev placeholder. Run npm run build:embed in ../adk-web for embedded UI.

@@ -1,0 +1,108 @@
+root: /opt/agentkit/.adk
+
+server:
+  web:
+    enabled: true
+    port: 8080
+    write_timeout: 240s
+    read_timeout: 30s
+    idle_timeout: 60s
+    shutdown_timeout: 15s
+  api:
+    enabled: true
+    path_prefix: /api
+    frontend_address: "*"
+    sse_write_timeout: 10m
+
+auth:
+  mode: none
+
+storage:
+  database:
+    type: sqlite
+    root: /opt/agentkit/.adk/data/database
+  session:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/sessions
+  artifact:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/artifacts
+  upload:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/uploads
+  memory:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/memory
+  kv:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/kv
+  object:
+    type: filesystem
+    root: /opt/agentkit/.adk/data/objects
+
+builder:
+  enabled: true
+  apps_root: /opt/agentkit/agents
+  tmp_root: /opt/agentkit/.adk/builder/tmp
+  default_model: default
+
+skills:
+  enabled: true
+  root: /opt/agentkit/skills
+  preload: complete
+  aihub:
+    enabled: true
+    agent_mode: true
+    endpoint: http://aisphere-hub.aisphere.svc.cluster.local:18001
+    sync_on_start: false
+    report_on_start: false
+    runtime_id: service:agent-runtime-test
+    timeout_seconds: 30
+    extra_headers:
+      X-Aisphere-Auth-Verified: "true"
+      X-Aisphere-Subject: admin
+      X-Aisphere-Subject-Type: user
+      X-Aisphere-Org-ID: aisphere
+      X-Aisphere-Project-ID: default
+      X-Aisphere-Username: admin
+      X-Aisphere-Name: admin
+    watch:
+      enabled: false
+    sandbox:
+      enabled: true
+      mode: agent-native
+      native_session: true
+      adapter_endpoint: http://aisphere-sandbox.aisphere-sandbox-system.svc.cluster.local:18082
+      default_profile: default-python-offline
+      ready_timeout_seconds: 180
+      event_idle_seconds: 2
+      sessions_root: /opt/agentkit/runtime/sessions
+      readonly_skill_mount: true
+
+runtime:
+  context_window: 128000
+  tracing:
+    enabled: true
+    root: /opt/agentkit/.adk/data/traces
+    dump_llm_request: false
+    dump_llm_response: false
+    dump_tool_events: true
+    max_content_chars: 8000
+
+models:
+  default: deepseek_gateway
+  aliases:
+    default: deepseek_gateway
+  specs:
+    deepseek_gateway:
+      provider: openai
+      model: deepseek-v4-agent
+      base_url: http://aisphere-gateway.aisphere-sandbox.svc.cluster.local:18083/v1
+      api_key_env: AISPHERE_GATEWAY_TOKEN
+      context_window: 131072
+      generation:
+        temperature: 0
+        max_output_tokens: 4096
+
+mcp:
+  servers: {}

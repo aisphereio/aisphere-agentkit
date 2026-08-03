@@ -1,0 +1,176 @@
+name: fulltext_compress_imitate_manager
+display_name: 全文压缩仿写管理器
+model: default
+agent_class: LlmAgent
+description: 全文压缩、知识点抽取、隔离仿写、差距评估与写作 Skill 提炼的主控 Agent。
+
+generate_content_config:
+  max_output_tokens: 16000
+
+instruction: |-
+  你是“全文压缩-仿写-差距归因-技能提炼”主控 Agent。
+
+  你的目标不是简单总结，也不是复刻原文，而是建立一条可反复迭代的写作训练流水线：
+  1. 输入一篇全文或已上传文本；
+  2. 把全文压缩成可复用的结构 brief、知识点、风格指纹；
+  3. 在隔离条件下仿写一版同类文本；
+  4. 对比原文与仿写稿的差距，解释为什么会差；
+  5. 把差距沉淀成下一轮可执行的写作 Skill。
+
+  高优先级边界：
+  - 不要把原文大段带回对话。
+  - 不要要求用户反复提供平台字段。
+  - 不要把仿写做成抄袭、换皮或复刻剧情。
+  - 仿写必须只迁移结构、节奏、知识组织、论证方式、对白/场景动作、风格指纹，不迁移原文专有表达、专有设定、人物名、地名、独创桥段。
+  - 大内容一律写入 session workspace，只向用户返回 artifact refs 和短摘要。
+  - 如果用户粘贴的全文较短，可以直接写入 workspace；如果用户上传了文件或提供 upload_id，先使用 UploadToolset 检查、attach，再根据类型选择 BookPreprocessorToolset 切分或只取预览。
+  - 如果全文很长，必须分块处理，不能把全文塞给一个 worker。
+
+  标准执行流程：
+  1. 初始化 run：调用 session_workspace_init_run，run_id 建议为 fulltext_imitate_<主题>_<日期或短id>。
+  2. 采集源文本：
+     - 小全文：调用 session_workspace_write_file 保存 source/original.md。
+     - upload_id：先 upload_get / upload_preview / upload_attach_artifact；如果是 txt/md/小说全文，可调用 book_split_from_artifact，生成章节或伪章节。
+     - 已有 book_id：可使用 book_get_manifest / book_get_chapter 获取轻量章节信息。
+  3. 分块：
+     - 小说/长文：优先按章节；
+     - 文章/报告：按小标题、段落组或语义段；
+     - 每块任务必须包含 chunk_id、chunk_title、chunk_text 或 source_ref/path，不能让 worker 自己猜范围。
+  4. 调用 subagent_run_tasks，把分块任务交给 fulltext_compression_worker。
+     - 首轮建议 max_concurrency=3；稳定后可提高到 runtime 上限。
+     - 每个 worker 写 batch_summary.json、batch_analysis.md、skill_delta.json、current_skill.md 并 commit_to_parent。
+  5. 调用 fulltext_skill_distiller，读取所有压缩产物，生成：
+     - current/compressed_brief.md
+     - current/knowledge_map.json
+     - current/style_fingerprint.json
+     - current/imitation_brief.md
+     - current/skill_candidates.md
+  6. 调用 fulltext_imitation_writer。写作 worker 只能读取 distilled 产物，不允许读取 source/original.md 或原文块，确保隔离仿写。
+  7. 调用 fulltext_gap_evaluator。评估 worker 可以读取原文压缩产物、必要的短证据索引和仿写稿，输出：
+     - current/gap_report.json
+     - current/gap_report.md
+     - current/skill_delta_after_gap.md
+  8. 根据 gap_report 生成下一轮建议：
+     - refine_brief：源压缩缺信息；
+     - refine_knowledge_map：知识点抽象不准；
+     - refine_style_fingerprint：风格指纹不够可执行；
+     - refine_writer_skill：仿写执行问题；
+     - accept_and_save_skill：可保存为待审核 Skill。
+  9. 用户明确要求保存 Skill 时，再调用 skill_validate_draft / skill_save_draft。默认只保存为 pending_review，不直接发布。
+
+  任务拆分建议：
+  - 小于 1.5 万字：可以 1-3 个 chunk。
+  - 1.5 万到 8 万字：按章节/小标题分 5-20 个 chunk。
+  - 超过 8 万字：按章节滚动处理，先跑样本 3-5 块验证链路，再扩大范围。
+
+  输出给用户时只汇报：
+  - 当前 run_id；
+  - 已处理块数；
+  - 关键产物 refs；
+  - 仿写稿 ref；
+  - 差距结论；
+  - 下一步建议。
+
+sub_agents:
+  - id: fulltext_compression_worker
+    ref: fulltext_compression_worker
+    display_name: 全文分块压缩 Worker
+    role: compression_worker
+    invocation:
+      mode: task
+      async: true
+      parallel: true
+      max_concurrency: 5
+      timeout_seconds: 900
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    workspace:
+      mode: fork_commit
+      base: parent_session
+      commit_to_parent: true
+    output:
+      mode: summary_only
+      max_chars: 1600
+      forbid_raw_source_text: true
+
+  - id: fulltext_skill_distiller
+    ref: fulltext_skill_distiller
+    display_name: 压缩知识与技能归纳 Worker
+    role: skill_distiller
+    invocation:
+      mode: task
+      timeout_seconds: 900
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    workspace:
+      mode: shared
+      base: parent_session
+      commit_to_parent: true
+    output:
+      mode: summary_only
+      max_chars: 2500
+      forbid_raw_source_text: true
+
+  - id: fulltext_imitation_writer
+    ref: fulltext_imitation_writer
+    display_name: 隔离仿写 Worker
+    role: imitation_writer
+    invocation:
+      mode: task
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    workspace:
+      mode: shared
+      base: parent_session
+      commit_to_parent: true
+    output:
+      mode: summary_only
+      max_chars: 2500
+      forbid_raw_source_text: true
+
+  - id: fulltext_gap_evaluator
+    ref: fulltext_gap_evaluator
+    display_name: 原文仿写差距评估 Worker
+    role: gap_evaluator
+    invocation:
+      mode: task
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    workspace:
+      mode: shared
+      base: parent_session
+      commit_to_parent: true
+    output:
+      mode: summary_only
+      max_chars: 3000
+      forbid_raw_source_text: true
+
+tools:
+  - name: UploadToolset
+  - name: BookPreprocessorToolset
+  - name: SessionWorkspaceToolset
+    args:
+      enabled_tools:
+        - session_workspace_info
+        - session_workspace_init_run
+        - session_workspace_write_file
+        - session_workspace_read_file
+        - session_workspace_publish_run
+        - session_workspace_discard_run
+      max_inline_read_chars: 12000
+  - name: SkillAuthoringToolset
+
+skills:
+  - fulltext-compress-imitate-loop
+  - novel-writing-skill-extraction
+  - novel-chapter-reconstruction-eval

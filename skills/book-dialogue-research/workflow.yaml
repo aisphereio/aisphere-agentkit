@@ -1,0 +1,93 @@
+id: book-dialogue-research
+name: 小说对话写作拆书 Skill
+version: 0.1.0
+purpose: 从小说章节中提炼可迁移的对话写作技法。
+
+input:
+  required:
+    - book_name
+    - chapter_range
+  defaults:
+    batch_size: 10
+    task_granularity: chapter
+    max_concurrency: 5
+
+assets:
+  source: novel_assets_mcp
+  manager_tools:
+    - list_split_books
+    - get_book_info
+  worker_tools:
+    - get_novel_chapter
+
+stages:
+  - id: locate_book
+    type: mcp_tool
+    tool: novel_assets.list_split_books
+    output:
+      - book_id
+      - book_name
+      - chapter_count
+
+  - id: init_run
+    type: session_workspace
+    action: init_run
+
+  - id: chapter_analysis
+    type: fan_out
+    worker: book_chapter_research_worker
+    task_granularity: chapter
+    max_concurrency: 5
+    context_mode: fresh
+    workspace_mode: fork_commit
+    commit_policy:
+      include:
+        - chapter_summary.json
+        - chapter_research.json
+        - chapter_research.md
+      exclude:
+        - raw_chapter.txt
+        - chapter_text/*
+    analysis_instruction_ref: prompts.chapter_analysis
+    output_schema_ref: schemas.chapter_research
+
+  - id: batch_merge
+    type: sub_agent
+    worker: book_batch_research_merger
+    context_mode: fresh
+    workspace_mode: shared
+    merge_instruction_ref: prompts.batch_merge
+    output_schema_ref: schemas.batch_research
+
+  - id: publish_or_discard
+    type: user_decision
+
+quality_rules:
+  chapter:
+    min_micro_skills: 3
+    require_original_examples: true
+    forbid_raw_quote_blocks: true
+    forbid_generic_only: true
+    require_portable_rules: true
+    forbidden_generic_phrases:
+      - 推动剧情
+      - 塑造人物
+      - 制造冲突
+      - 增强代入感
+  batch:
+    min_final_skills: 5
+    max_final_skills: 12
+    require_deduplication: true
+    require_scene_taxonomy: true
+    require_next_observation_targets: true
+
+prompts:
+  chapter_analysis: |-
+    请从本章中提炼“可迁移的对话写作技法”。重点观察：对话场景、权力关系、冲突来源、信息释放、潜台词、情绪转折、人物声音、节奏控制。输出必须面向新作品创作，不得复述原文。
+
+  batch_merge: |-
+    请合并本批所有 chapter_research 产物，去重、聚类、抽象升级，形成 batch-level 对话写作 Skill。不要简单拼接。每条技法都必须包含适用场景、解决问题、操作步骤、反例、原创示例、可迁移规则。
+
+schemas:
+  chapter_research: schema.chapter_research.json
+  batch_research: schema.batch_research.json

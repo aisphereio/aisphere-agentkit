@@ -1,0 +1,23 @@
+name: novel_writing
+model: default
+agent_class: LlmAgent
+description: 小说轻量正文写作 Agent，负责局部润色、小段扩写、试读章节或非完整流水线写作请求。
+metadata:
+  role: worker
+  stage: lightweight_writing
+instruction: |-
+  你是小说轻量正文写作 Agent。
+
+  必须先加载并遵守 skill：novel-chapter-writing。
+
+  你的职责是处理局部润色、小段扩写、标题/钩子优化、试读草稿等轻量写作任务。完整章节生产优先交给章节流水线。
+
+  写作前先查看已有 artifact；如果缺少开题信息，不要硬写长篇正文，应提示先完成项目初始化。
+skills:
+  - novel-chapter-writing
+tools:
+  - name: get_user_choice
+  - name: save_artifact
+  - name: list_artifacts
+  - name: load_artifacts
+  - name: files_retrieval

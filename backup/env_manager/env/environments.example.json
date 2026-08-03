@@ -1,0 +1,287 @@
+{
+  "environments": [
+    {
+      "environment_id": "hongmei-root-ssh",
+      "name": "HongMei 真实 SSH 环境",
+      "type": "linux+docker+kubernetes+go+python+logs",
+      "connection_type": "ssh",
+      "host": "CHANGE_ME_HOST",
+      "port": 22,
+      "username": "root",
+      "password_env": "ADK_ENV_HONGMEI_ROOT_PASSWORD",
+
+      "safety_mode": "read_auto_write_approval",
+      "freedom_level": "F3",
+      "allow_execute": true,
+      "allow_free_command": true,
+      "auto_approve_readonly": true,
+
+      "capabilities": [
+        "linux.read",
+        "docker.read",
+        "k8s.read",
+        "logs.read",
+        "go.read",
+        "python.read"
+      ],
+
+      "tags": [
+        "real",
+        "ssh",
+        "linux",
+        "docker",
+        "k8s",
+        "logs",
+        "root"
+      ],
+
+      "allowed_paths": [
+        "/root",
+        "/tmp",
+        "/opt",
+        "/var/log",
+        "/home",
+        "/data",
+        "/www",
+        "/workspace"
+      ],
+
+      "readonly_auto_approve": {
+        "enabled": true,
+        "risk_level": "L1",
+        "notes": "只读观察和日志查看可以自动执行，不需要用户审批。平台仍应进行命令风险分类，禁止把写操作伪装成只读操作。"
+      },
+
+      "approval_policy": {
+        "L1": {
+          "name": "readonly_observe",
+          "approval_required": false,
+          "description": "只读观察、日志查看、状态查询。"
+        },
+        "L2": {
+          "name": "state_affecting",
+          "approval_required": true,
+          "description": "可能影响服务状态或资源消耗的操作，例如 restart、rollout restart、docker exec 变更类操作。"
+        },
+        "L3": {
+          "name": "destructive_or_mutating",
+          "approval_required": true,
+          "description": "删除、修改、安装、停止、权限变更、配置写入、网络防火墙变更等高危操作。"
+        }
+      },
+
+      "readonly_command_allowlist": [
+        "uname",
+        "hostname",
+        "date",
+        "uptime",
+        "whoami",
+        "id",
+        "pwd",
+        "df",
+        "free",
+        "ps",
+        "top",
+        "ss",
+        "netstat",
+        "lsof",
+        "ls",
+        "cat",
+        "grep",
+        "egrep",
+        "fgrep",
+        "head",
+        "tail",
+        "find",
+        "du",
+        "docker ps",
+        "docker inspect",
+        "docker logs",
+        "docker images",
+        "docker network ls",
+        "docker volume ls",
+        "kubectl get",
+        "kubectl describe",
+        "kubectl logs",
+        "kubectl top",
+        "journalctl",
+        "systemctl status",
+        "go version",
+        "python --version",
+        "python3 --version",
+        "which"
+      ],
+
+      "dangerous_command_patterns": [
+        "rm ",
+        "rm -",
+        "rm -rf",
+        " rmdir ",
+        "mv ",
+        "cp ",
+        "chmod ",
+        "chmod -R",
+        "chown ",
+        "chown -R",
+        "tee ",
+        "sed -i",
+        ">",
+        ">>",
+        "docker rm",
+        "docker restart",
+        "docker stop",
+        "docker kill",
+        "docker compose down",
+        "docker compose restart",
+        "docker system prune",
+        "kubectl delete",
+        "kubectl apply",
+        "kubectl patch",
+        "kubectl edit",
+        "kubectl scale",
+        "kubectl rollout restart",
+        "systemctl restart",
+        "systemctl stop",
+        "systemctl disable",
+        "service restart",
+        "service stop",
+        "kill ",
+        "pkill ",
+        "apt install",
+        "apt remove",
+        "apt upgrade",
+        "yum install",
+        "yum remove",
+        "dnf install",
+        "dnf remove",
+        "iptables",
+        "firewall-cmd",
+        "reboot",
+        "shutdown"
+      ],
+
+      "business_log": {
+        "enabled": true,
+        "default_tail": 200,
+        "max_tail": 2000,
+        "follow_default": true,
+        "max_stream_seconds": 3600,
+        "supported_kinds": [
+          "docker",
+          "k8s",
+          "file",
+          "journal"
+        ],
+        "docker": {
+          "enabled": true,
+          "default_command_template": "docker logs --tail {{tail}} {{follow_flag}} {{container}}"
+        },
+        "k8s": {
+          "enabled": true,
+          "default_namespace": "default",
+          "default_command_template": "kubectl logs -n {{namespace}} {{pod}} --tail={{tail}} {{follow_flag}}"
+        },
+        "file": {
+          "enabled": true,
+          "allowed_paths": [
+            "/var/log",
+            "/tmp",
+            "/opt",
+            "/data",
+            "/www",
+            "/workspace"
+          ],
+          "default_command_template": "tail -n {{tail}} {{follow_flag}} {{path}}"
+        },
+        "journal": {
+          "enabled": true,
+          "default_command_template": "journalctl -u {{unit}} -n {{tail}} {{follow_flag}} --no-pager"
+        }
+      },
+
+      "notes": "真实 SSH 环境。密码只允许从 ADK_ENV_HONGMEI_ROOT_PASSWORD 环境变量读取，配置文件不保存密钥。默认允许 L1 只读观察和日志查看自动执行；L2/L3 变更类操作必须用户审批。"
+    },
+    {
+      "environment_id": "local-dev-dryrun",
+      "name": "本地开发 Dry Run",
+      "type": "linux+logs",
+      "connection_type": "local",
+
+      "safety_mode": "read_auto_write_approval",
+      "freedom_level": "F3",
+      "allow_execute": false,
+      "allow_free_command": false,
+      "auto_approve_readonly": true,
+
+      "capabilities": [
+        "linux.read",
+        "docker.read",
+        "k8s.read",
+        "logs.read",
+        "go.read",
+        "python.read"
+      ],
+
+      "tags": [
+        "dev",
+        "local",
+        "dry-run"
+      ],
+
+      "allowed_paths": [
+        "/tmp",
+        "/var/log"
+      ],
+
+      "readonly_auto_approve": {
+        "enabled": true,
+        "risk_level": "L1",
+        "notes": "本地 dry-run 示例环境。即使命令是只读，也不真实执行，用于调试 Agent 决策和命令生成。"
+      },
+
+      "approval_policy": {
+        "L1": {
+          "name": "readonly_observe",
+          "approval_required": false,
+          "description": "只读观察、日志查看、状态查询。"
+        },
+        "L2": {
+          "name": "state_affecting",
+          "approval_required": true,
+          "description": "可能影响服务状态或资源消耗的操作。"
+        },
+        "L3": {
+          "name": "destructive_or_mutating",
+          "approval_required": true,
+          "description": "删除、修改、安装、停止、权限变更、配置写入等高危操作。"
+        }
+      },
+
+      "business_log": {
+        "enabled": true,
+        "default_tail": 200,
+        "max_tail": 1000,
+        "follow_default": true,
+        "max_stream_seconds": 600,
+        "supported_kinds": [
+          "file",
+          "journal"
+        ],
+        "file": {
+          "enabled": true,
+          "allowed_paths": [
+            "/tmp",
+            "/var/log"
+          ],
+          "default_command_template": "tail -n {{tail}} {{follow_flag}} {{path}}"
+        },
+        "journal": {
+          "enabled": true,
+          "default_command_template": "journalctl -u {{unit}} -n {{tail}} {{follow_flag}} --no-pager"
+        }
+      },
+
+      "notes": "本地 dry-run 示例，不会真正执行命令。用于验证 env_manager 的自由命令、风险分级和业务日志面板交互。"
+    }
+  ]
+}

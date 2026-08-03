@@ -1,0 +1,14 @@
+name: novel_chapter_pipeline
+agent_class: SequentialAgent
+description: 小说章节生产流水线。固定执行上下文打包、章节计划、场景卡、正文草稿、章节检查、修订定稿、故事状态更新。
+metadata:
+  role: workflow
+  orchestration: sequential
+sub_agents:
+  - config_path: ./context_pack_agent.yaml
+  - config_path: ./chapter_plan_agent.yaml
+  - config_path: ./scene_design_agent.yaml
+  - config_path: ./chapter_writer_agent.yaml
+  - config_path: ./chapter_review_agent.yaml
+  - config_path: ./chapter_rewrite_agent.yaml
+  - config_path: ./story_state_update_agent.yaml

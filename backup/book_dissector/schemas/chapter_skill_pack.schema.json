@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChapterSkillPack",
+  "type": "object",
+  "required": [
+    "book_id",
+    "chapter_index",
+    "chapter_title",
+    "compressed_brief",
+    "scene_contract",
+    "techniques",
+    "style_fingerprint"
+  ],
+  "properties": {
+    "book_id": {"type": "string", "minLength": 1},
+    "chapter_index": {"type": "integer", "minimum": 1},
+    "chapter_title": {"type": "string"},
+    "source_artifacts": {"type": "array", "items": {"type": "string"}},
+    "compressed_brief": {"type": "string", "minLength": 50, "maxLength": 260},
+    "character_state": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "visible_goal", "hidden_pressure", "relationship_delta"],
+        "properties": {
+          "name": {"type": "string"},
+          "visible_goal": {"type": "string"},
+          "hidden_pressure": {"type": "string"},
+          "relationship_delta": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "scene_contract": {
+      "type": "object",
+      "required": ["opening_hook", "central_conflict", "turning_point", "ending_hook"],
+      "properties": {
+        "opening_hook": {"type": "string"},
+        "central_conflict": {"type": "string"},
+        "turning_point": {"type": "string"},
+        "ending_hook": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "techniques": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["name", "purpose", "execution_steps", "success_signals", "failure_modes"],
+        "properties": {
+          "name": {"type": "string"},
+          "purpose": {"type": "string"},
+          "execution_steps": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "success_signals": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "failure_modes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "transfer_scope": {"type": "string"},
+          "anti_overfit_rule": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "style_fingerprint": {
+      "type": "object",
+      "required": ["pov", "sentence_rhythm", "dialogue_ratio", "sensory_texture", "tension_pattern"],
+      "properties": {
+        "pov": {"type": "string"},
+        "sentence_rhythm": {"type": "string"},
+        "dialogue_ratio": {"type": "string"},
+        "sensory_texture": {"type": "string"},
+        "tension_pattern": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "context_pack": {
+      "type": "object",
+      "properties": {
+        "required": {"type": "boolean"},
+        "items": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "quality_bar": {
+      "type": "object",
+      "properties": {
+        "must_be_reusable": {"type": "boolean"},
+        "must_be_executable": {"type": "boolean"},
+        "must_avoid_plot_copy": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

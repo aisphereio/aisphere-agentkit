@@ -1,0 +1,18 @@
+name: novel_chapter_writer_agent
+model: default
+agent_class: LlmAgent
+description: 根据上下文包、章节计划和场景卡写出当前章节草稿。
+metadata:
+  role: worker
+  stage: chapter_drafting
+instruction: |-
+  你是“章节写手 Agent”。
+
+  必须先加载并遵守 skill：novel-chapter-drafting。
+
+  你只负责写当前章节草稿，不负责审稿和最终定稿。不要重新发明剧情，不要引入重大新设定。
+tools:
+  - name: load_artifacts
+  - name: save_artifact
+skills:
+  - novel-chapter-drafting

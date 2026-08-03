@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "required": ["book_name", "chapter_no", "skill_id", "micro_skills", "quality_self_check"],
+  "properties": {
+    "book_name": {"type": "string"},
+    "chapter_no": {"type": "integer"},
+    "chapter_title": {"type": "string"},
+    "skill_id": {"type": "string"},
+    "dialogue_scene_types": {"type": "array", "items": {"type": "string"}},
+    "power_relations": {"type": "array", "items": {"type": "string"}},
+    "conflict_drivers": {"type": "array", "items": {"type": "string"}},
+    "information_release": {"type": "array", "items": {"type": "string"}},
+    "subtext_patterns": {"type": "array", "items": {"type": "string"}},
+    "emotion_turns": {"type": "array", "items": {"type": "string"}},
+    "character_voice": {"type": "array", "items": {"type": "string"}},
+    "pacing_control": {"type": "array", "items": {"type": "string"}},
+    "micro_skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "scene", "problem_it_solves", "principle", "operation_steps", "anti_pattern", "original_example", "portable_rule"],
+        "properties": {
+          "name": {"type": "string"},
+          "scene": {"type": "string"},
+          "problem_it_solves": {"type": "string"},
+          "principle": {"type": "string"},
+          "operation_steps": {"type": "array", "items": {"type": "string"}},
+          "anti_pattern": {"type": "string"},
+          "original_example": {"type": "string"},
+          "portable_rule": {"type": "string"}
+        }
+      }
+    },
+    "chapter_level_summary": {"type": "string"},
+    "quality_self_check": {
+      "type": "object",
+      "properties": {
+        "has_portable_rules": {"type": "boolean"},
+        "has_original_examples": {"type": "boolean"},
+        "raw_quote_risk": {"type": "string"},
+        "generic_risk": {"type": "string"},
+        "needs_revision": {"type": "boolean"}
+      }
+    }
+  }
+}

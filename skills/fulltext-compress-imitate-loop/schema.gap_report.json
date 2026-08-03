@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "required": ["run_id", "overall_result", "gap_scores", "decision", "top_skill_fixes"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "overall_result": {"type": "string", "enum": ["pass", "partial", "fail", "risk"]},
+    "gap_scores": {
+      "type": "object",
+      "required": ["structure_gap", "knowledge_gap", "style_gap", "skill_gap", "execution_gap", "originality_risk"],
+      "properties": {
+        "structure_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "knowledge_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "style_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "skill_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "execution_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "originality_risk": {"type": "integer", "minimum": 0, "maximum": 5}
+      }
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["accept_sample", "refine_brief", "refine_knowledge_map", "refine_style_fingerprint", "refine_writer_skill", "retry_writer", "request_human_review"]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gap_type", "observation", "suggested_fix"],
+        "properties": {
+          "gap_type": {"type": "string"},
+          "observation": {"type": "string"},
+          "suggested_fix": {"type": "string"}
+        }
+      }
+    },
+    "top_skill_fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "change", "reason", "validation"],
+        "properties": {
+          "target": {"type": "string"},
+          "change": {"type": "string"},
+          "reason": {"type": "string"},
+          "validation": {"type": "string"}
+        }
+      }
+    },
+    "artifact_refs": {"type": "object"}
+  }
+}

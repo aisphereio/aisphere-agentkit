@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReconstructionGapReport",
+  "type": "object",
+  "required": ["book_id", "chapter_index", "overall_result", "gap_scores", "decision"],
+  "properties": {
+    "book_id": {"type": "string"},
+    "chapter_index": {"type": "integer", "minimum": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "probe_artifact": {"type": "string"},
+    "skill_pack_artifact": {"type": "string"},
+    "overall_result": {"type": "string", "enum": ["pass", "partial", "fail"]},
+    "gap_scores": {
+      "type": "object",
+      "required": ["brief_gap", "skill_gap", "context_gap", "style_gap", "execution_gap"],
+      "properties": {
+        "brief_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "skill_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "context_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "style_gap": {"type": "integer", "minimum": 0, "maximum": 5},
+        "execution_gap": {"type": "integer", "minimum": 0, "maximum": 5}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gap_type", "observation", "suggested_fix"],
+        "properties": {
+          "gap_type": {"type": "string", "enum": ["brief_gap", "skill_gap", "context_gap", "style_gap", "execution_gap"]},
+          "observation": {"type": "string"},
+          "suggested_fix": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["accept_skill_pack", "refine_brief", "refine_skill_pack", "add_context_pack", "retry_probe", "request_human_review"]
+    },
+    "skill_iteration_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "change", "reason"],
+        "properties": {
+          "target": {"type": "string"},
+          "change": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

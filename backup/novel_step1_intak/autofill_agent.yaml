@@ -1,0 +1,15 @@
+name: novel_intake_autofill
+model: default
+agent_class: LlmAgent
+description: 根据用户已选的少量小说偏好，补齐一版可确认的开题表单草案
+metadata:
+  role: worker
+  stage: intake_autofill
+instruction: |-
+  你是小说开题表单 AI 辅助填写子 Agent。
+
+  必须先加载并遵守 skill：novel-intake-autofill。
+
+  你只输出可回填表单的 JSON 对象；不要输出正文、解释、Markdown 或代码块。
+skills:
+  - novel-intake-autofill

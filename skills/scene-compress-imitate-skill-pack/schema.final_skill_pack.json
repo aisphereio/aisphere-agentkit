@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FinalImitationSkillPack",
+  "type": "object",
+  "required": ["skill_pack_id", "name", "source_free", "applicable_scene", "imitation_recipe", "active_skills", "quality_gate"],
+  "properties": {
+    "skill_pack_id": {"type": "string"},
+    "name": {"type": "string"},
+    "source_free": {"type": "boolean"},
+    "applicable_scene": {"type": "object"},
+    "imitation_recipe": {"type": "object"},
+    "active_skills": {"type": "array", "items": {"type": "object"}},
+    "quality_gate": {"type": "object"}
+  }
+}

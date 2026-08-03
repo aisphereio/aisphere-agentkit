@@ -1,0 +1,37 @@
+name: scene-compress-imitate-skill-pack
+version: 0.1.0
+entry_agent: book_scene_skill_pack_manager_mcp
+purpose: >-
+  场景级压缩仿写实验室。最终输出 scene_final_skill_pack，回答“怎么仿写、带什么技能”。
+
+skill_types:
+  scene_compression_card:
+    description: 场景压缩卡，writer 可见，source-free，可支持隔离仿写。
+  scene_imitation_draft:
+    description: writer 只看场景卡和 overlay 后生成的仿写稿。
+  scene_imitation_gap_report:
+    description: evaluator 对原文场景、场景卡、仿写稿的差距归因。
+  scene_skill_overlay_context:
+    description: 下一轮 writer 的运行时技能叠加上下文。
+  scene_final_skill_pack:
+    description: 多场景、多轮验证后的最终仿写技能包。
+
+rounds:
+  - round: 1
+    writer_context:
+      - scene_compression_card
+      - base_imitation_constraints
+    purpose: 验证场景卡本身是否足够支持仿写。
+  - round: 2
+    writer_context:
+      - scene_compression_card
+      - scene_skill_overlay_context
+      - base_imitation_constraints
+    purpose: 验证技能叠加上下文是否缩小差距。
+
+quality_gates:
+  source_free_final_skill: true
+  writer_forbid_source_text: true
+  evaluator_may_read_limited_source: true
+  no_hot_yaml_patch: true
+  skill_overlay_as_runtime_context: true

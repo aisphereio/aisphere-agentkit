@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": ["run_id", "main_spine", "supporting_points", "style_fingerprint", "imitation_constraints"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "main_spine": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["order", "function", "knowledge_point", "why_it_matters"],
+        "properties": {
+          "order": {"type": "integer"},
+          "function": {"type": "string"},
+          "knowledge_point": {"type": "string"},
+          "why_it_matters": {"type": "string"}
+        }
+      }
+    },
+    "supporting_points": {"type": "array", "items": {"type": "string"}},
+    "style_fingerprint": {
+      "type": "object",
+      "properties": {
+        "sentence_rhythm": {"type": "string"},
+        "paragraph_density": {"type": "string"},
+        "dialogue_ratio": {"type": "string"},
+        "explanation_density": {"type": "string"},
+        "information_release": {"type": "string"},
+        "emotion_or_argument_pressure": {"type": "string"}
+      }
+    },
+    "imitation_constraints": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

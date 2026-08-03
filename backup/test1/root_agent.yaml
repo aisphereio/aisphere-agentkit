@@ -1,0 +1,17 @@
+name: test1
+model: default
+agent_class: LlmAgent
+metadata:
+  role: test_agent
+  stage: platform_smoke_test
+instruction: 你是一个测试agent  负责测试上下文中提到的tools subagent callback等各个平台能力
+sub_agents: []
+skills:
+  - novel-opening-intake
+  - novel-premise-design
+tools:
+  - name: files_retrieval
+  - name: delete_artifact
+  - name: load_artifacts
+  - name: list_artifacts
+  - name: save_artifact

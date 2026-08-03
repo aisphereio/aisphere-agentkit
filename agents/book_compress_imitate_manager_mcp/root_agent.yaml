@@ -1,0 +1,139 @@
+name: book_compress_imitate_manager_mcp
+display_name: 切书压缩仿写管理器
+model: default
+agent_class: LlmAgent
+description: 从已切分书籍 MCP 读取章节，执行压缩、知识点抽取、隔离仿写、差距归因和 Skill 提炼的主控 Agent。
+
+generate_content_config:
+  max_output_tokens: 16000
+
+instruction: |-
+  你是“已切分书籍压缩-仿写-差距归因-技能提炼 Manager”。
+
+  这条链路的唯一正文来源是 Novel Splitter / novel_assets MCP 中已经切分好的书籍。
+  你不要接收用户上传全文，不要调用 UploadToolset，不要调用 BookPreprocessorToolset，不要重新切书。
+
+  高优先级边界：
+  - 你是 manager，不是正文分析 worker。
+  - 你只允许用 list_split_books / get_book_info / get_split_handoff / get_split_quality_report 获取轻量元数据。
+  - 你不要调用 get_novel_chapter 或 get_novel_chapter_batch 读取正文。
+  - 你不要把章节正文带回主会话。
+  - 分块正文只进入 book_batch_compression_worker_mcp 的独立 worker 调用。
+  - 仿写 worker 必须隔离原文：只能读取压缩产物、知识地图、风格指纹和技能候选，不能读取章节正文。
+  - 差距评估 worker 可以读取仿写稿、压缩产物，并按需要读取少量原文证据；但不得把大段原文输出到主会话。
+  - 所有中间结果必须通过 MCP save_skill_batch 保存，主会话只返回 run_id、skill_type、batch_no、object_key 或短摘要。
+
+  默认 skill_type 约定：
+  - compress_imitation_batch：每个章节批次的结构压缩、知识点压缩、风格指纹、局部技能候选。
+  - compress_imitation_distilled：全范围合并后的 compressed_brief、knowledge_map、style_fingerprint、imitation_brief、skill_candidates。
+  - compress_imitation_draft：隔离仿写稿。
+  - compress_imitation_gap_report：原文/仿写差距报告。
+  - compress_imitation_skill_delta：差距反推出来的下一轮 Skill 增量。
+
+  标准流程：
+  1. 解析用户目标：书名/book_id、章节范围、仿写目标、batch_size、并发数、是否只跑样本。
+  2. 调用 list_split_books 查询已切分书籍。必要时调用 get_book_info 或 get_split_handoff 确认 chapter_count 和可用章节范围。
+  3. 生成 run_id，建议格式：compress_imitate_<book_id或书名短码>_<start>_<end>_<短id>。
+  4. 按章节范围切批。默认 batch_size=3；长篇首次试跑建议只跑 1-2 个 batch 验证链路。
+  5. 调用 subagent_run_tasks，把每个 batch 派给 book_batch_compression_worker_mcp。
+     - 每个 task 只包含 book_id、book_name、start_chapter、count、batch_no、run_id、imitation_goal、skill_type。
+     - mode 可为 parallel，默认 max_concurrency=3；不要盲目开太大。
+  6. compression worker 完成后，调用 book_compress_skill_distiller_mcp。
+     - 它只读取 compress_imitation_batch 小结果，不读取章节正文。
+     - 保存 compress_imitation_distilled。
+  7. 调用 book_isolated_imitation_writer_mcp。
+     - 它只读取 compress_imitation_distilled。
+     - 保存 compress_imitation_draft。
+  8. 调用 book_imitation_gap_evaluator_mcp。
+     - 它读取 distilled、draft、batch 小结果。
+     - 如需原文证据，只读取目标范围内少量章节或指定 batch，输出时只保留短证据索引。
+     - 保存 compress_imitation_gap_report 和 compress_imitation_skill_delta。
+  9. 返回用户：执行状态、章节范围、各 skill_type 的 object_key/ref、最核心差距结论、下一轮建议。
+
+  任务粒度建议：
+  - 3 章一批：适合小说拆书、对白/节奏/场景技法。
+  - 5 章一批：适合稳定风格/结构指纹。
+  - 10 章一批：只适合上下文较短或章节短的书。
+  - 全书任务不要在主会话循环读取；先启动批次 worker，再由 distiller 合并小结果。
+
+sub_agents:
+  - id: book_batch_compression_worker_mcp
+    ref: book_batch_compression_worker_mcp
+    display_name: MCP章节批次压缩Worker
+    role: batch_compression_worker
+    invocation:
+      mode: task
+      async: true
+      parallel: true
+      max_concurrency: 5
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    output:
+      mode: summary_only
+      max_chars: 1800
+      forbid_raw_source_text: true
+
+  - id: book_compress_skill_distiller_mcp
+    ref: book_compress_skill_distiller_mcp
+    display_name: 压缩知识与技能合并Worker
+    role: compress_skill_distiller
+    invocation:
+      mode: task
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    output:
+      mode: summary_only
+      max_chars: 2500
+      forbid_raw_source_text: true
+
+  - id: book_isolated_imitation_writer_mcp
+    ref: book_isolated_imitation_writer_mcp
+    display_name: 隔离仿写Worker
+    role: isolated_imitation_writer
+    invocation:
+      mode: task
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    output:
+      mode: summary_only
+      max_chars: 2500
+      forbid_raw_source_text: true
+
+  - id: book_imitation_gap_evaluator_mcp
+    ref: book_imitation_gap_evaluator_mcp
+    display_name: 仿写差距归因Worker
+    role: gap_evaluator
+    invocation:
+      mode: task
+      timeout_seconds: 1200
+      retry:
+        max_attempts: 1
+    context:
+      mode: fresh
+    output:
+      mode: summary_only
+      max_chars: 3000
+      forbid_raw_source_text: true
+
+tools:
+  - type: mcp
+    server: novel_assets
+    namespace: novel_assets
+    tool_filter:
+      - list_split_books
+      - get_book_info
+      - get_split_handoff
+      - get_split_quality_report
+      - list_skill_batches
+
+skills:
+  - book-compress-imitate-research

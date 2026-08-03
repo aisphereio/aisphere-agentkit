@@ -1,0 +1,199 @@
+# ADK runtime configuration.
+# Dev mode: backend exposes API only; frontend runs separately with `npm run dev`.
+
+root: ./.adk
+
+server:
+  web:
+    enabled: true
+    port: 8080
+    write_timeout: 15s
+    read_timeout: 15s
+    idle_timeout: 60s
+    shutdown_timeout: 15s
+    otel_to_cloud: false
+
+  api:
+    enabled: true
+    path_prefix: /api
+    frontend_address: http://localhost:4200,http://localhost:8080,http://localhost:3001
+    sse_write_timeout: 10m
+    trace_capacity: 10000
+    resumable_runs:
+      enabled: true
+      mode: standalone
+      addrs:
+        - CHANGE_ME_HOST:30011
+      username: ""
+      password: CHANGE_ME_REDIS_PASSWORD
+      db: 0
+      key_prefix: adk:run
+      ttl: 6h
+      block_timeout: 15s
+
+  # Dev mode: do not serve embedded WebUI from Go.
+  # After frontend `npm run build:embed`, you can set enabled: true and open /ui/.
+  webui:
+    enabled: false
+    api_server_address: http://localhost:8080/api
+
+auth:
+  mode: aisphere
+  aisphere:
+    endpoint: http://localhost:18080
+    service_token: dev-aisphere-service-token-please-change-32chars
+    cookie_name: aisphere_session
+    app: agentkit
+    timeout_seconds: 10
+
+storage:
+  database:
+    type: postgres
+    # 示例：postgres://agentkit:CHANGE_ME@postgres:5432/agentkit_runtime?sslmode=disable
+    # 建议用环境变量，避免把密码写进仓库。
+    dsn_env: AGENTKIT_POSTGRES_DSN
+    auto_migrate: true
+    max_open_conns: 30
+    auto_create_database: true
+    maintenance_database: postgres    
+    max_idle_conns: 10
+    conn_max_lifetime: 1h
+    conn_max_idle_time: 15m    
+  session:
+    # database 会复用 storage.database；现在可落 PostgreSQL。
+    type: database
+  artifact:
+    # 默认回到本地 workspace 文件系统。
+    # 模型只看到当前 app/user/session 的 artifact workspace，不需要感知 project_id / S3 key。
+    type: filesystem
+    root: ./.adk/data/artifacts
+  upload:
+    type: filesystem
+    root: ./.adk/data/uploads
+  memory:
+    type: filesystem
+    root: ./.adk/data/memory
+  kv:
+    type: filesystem
+    root: ./.adk/data/kv
+  # NovelStore / domain asset object storage.
+  # 默认也落本地 workspace，便于离线/沙箱环境直接查看与调试；需要 S3/MinIO 时再显式改配置。
+  object:
+    type: filesystem
+    root: ./.adk/data/objects
+
+builder:
+  enabled: true
+  apps_root: ./agents
+  tmp_root: ./.adk/builder/tmp
+  default_model: default
+
+skills:
+  enabled: true
+  root: ./skills
+  preload: complete
+  # Permission-aware Skill sync from AIHub. Keep disabled by default for local dev.
+  # Runtime uses AIHub Catalog API instead of .well-known for private/shared skills.
+  aihub:
+    enabled: false
+    agent_mode: false
+    endpoint: http://localhost:8848
+    skillset: dev-default
+    sync_on_start: true
+    report_on_start: true
+    runtime_id: service:agent-runtime-dev
+    # Use an AIHub-accepted token, e.g. API key / bearer token / gateway-issued JWT.
+    token_env: AIHUB_RUNTIME_TOKEN
+    auth_header: Authorization
+    auth_scheme: Bearer
+    timeout_seconds: 30
+    watch:
+      enabled: true
+      mode: polling
+      poll_interval_seconds: 30
+      reconnect_seconds: 5
+    reload:
+      policy: new_sessions_only
+      keep_old_versions: 3
+      verify_sha256: true
+    revoke:
+      policy: disable_new_sessions
+      delete_cached: false
+    sandbox:
+      # local: materialize Hub snapshots under sessions_root and run in AgentKit process.
+      # agent-native: create/ensure a sandbox through aisphere-sandbox Adapter and
+      # proxy session messages to agentkit-session-worker inside the sandbox Pod.
+      enabled: true
+      mode: local
+      native_session: false
+      adapter_endpoint: http://localhost:18082
+      adapter_token_env: AISPHERE_SANDBOX_TOKEN
+      default_profile: default-python-offline
+      ready_timeout_seconds: 90
+      event_idle_seconds: 2
+      sessions_root: ./runtime/sessions
+      readonly_skill_mount: true
+
+runtime:
+  context_window: 128000
+  subagent_tasks:
+    # 平台级子 Agent 并发策略：Manager 可以请求并发数，但 runtime 会按这里裁决。
+    # 未指定时使用 default_concurrency；超过 max_concurrency 时会裁剪到上限。
+    default_concurrency: 5
+    max_concurrency: 5
+    # 子 Agent 任务观察事件保留时间；用于刷新页面后仍能查看已完成/失败状态和子会话交互。
+    observe_ttl: 6h
+  input_policy:
+    # 上传文件默认走 /api/platform/uploads；聊天消息里只传 upload_id / artifact 引用。
+    # 这层保护用于阻止前端误把整本 TXT/PDF/ZIP 直接塞进 newMessage.parts。
+    reject_large_inline: true
+    max_inline_text_chars: 64000
+    max_inline_data_bytes: 262144
+    warn_inline_text_chars: 16000
+    warn_inline_data_bytes: 65536
+  tracing:
+    enabled: true
+    root: ./.adk/data/traces
+    dump_llm_request: true
+    dump_llm_response: true
+    dump_tool_events: true
+    dump_stream_chunks: false
+    max_content_chars: 8000
+
+models:
+  default: default
+  aliases:
+    default: deepseek_gateway
+    deepseek: deepseek_gateway
+
+  specs:
+    deepseek_gateway:
+      provider: openai
+      # model 写 Hub/Gateway 的 ModelProfile ID，不写真实上游模型名。
+      model: deepseek-v4-agent
+      base_url: http://localhost:18083/v1
+      api_key_env: AISPHERE_GATEWAY_TOKEN
+      context_window: 131072
+      generation:
+        temperature: 0.7
+        max_output_tokens: 8192
+
+# Platform-level MCP server registry.
+# Agent Builder -> Tools -> MCP tool reads this list, discovers tools/list live,
+# then saves agent-level bindings as:
+#   tools:
+#     - type: mcp
+#       server: novel_assets
+#       tool_filter: [...]
+mcp:
+  servers:
+    novel_assets:
+      name: 小说资产 MCP
+      description: 小说切书、章节读取、质量报告、skill batch 保存服务。
+      transport: streamable_http
+      endpoint: http://localhost:8090/mcp
+      namespace: novel_assets
+      enabled: true
+      timeout_seconds: 60
+      headers:
+        Authorization: "Bearer change-me"

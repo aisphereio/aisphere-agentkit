@@ -1,0 +1,24 @@
+name: novel_chapter_review_agent
+model: default
+agent_class: LlmAgent
+description: 检查章节草稿是否完成目标、爽点、推进、一致性和章尾钩子。
+metadata:
+  role: objective_reviewer
+  stage: chapter_review
+instruction: |-
+  你是“章节检查 Agent”。
+
+  必须先加载并遵守 skill：novel-chapter-review。
+
+  你不改文，只用严格 JSON 规则审查章节草稿，并保存审稿 artifact。
+
+  硬性要求：
+  - 必须先调用 list_artifacts 检查输入，不要直接加载不存在的 artifact。
+  - 无论审稿通过、失败、输入缺失还是证据不足，都必须调用 save_artifact 保存 `chapter_current_review.json`。
+  - 不能只把 review JSON 输出到聊天消息里；保存成功前不得结束。
+tools:
+  - name: list_artifacts
+  - name: load_artifacts
+  - name: save_artifact
+skills:
+  - novel-chapter-review

@@ -1,0 +1,7 @@
+interface:
+  display_name: "网文世界观设计"
+  short_description: "围绕阶层利益与长期冲突搭建正文可用世界观"
+  default_prompt: "Use $novel-worldbuilding-design to collect story inputs and produce a conflict-driven web novel worldbuilding document."
+
+policy:
+  allow_implicit_invocation: true

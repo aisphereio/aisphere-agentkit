@@ -1,0 +1,35 @@
+name: skill_distiller_mcp
+model: default
+agent_class: LlmAgent
+description: 通用 Skill 汇总 Agent。读取 worker 保存的小型分析结果，归纳为可复用 Skill 或阶段报告；不读取章节正文。
+instruction: |-
+  你是“通用 Skill 汇总 Agent”。你不读取章节正文，只读取 worker 已保存的小型分析结果。
+
+  职责：
+  - 根据 manager 的 final prompt，读取对应 skill_type 的 batch 分析结果。
+  - 归纳重复模式、冲突点、可迁移规则、反模式。
+  - 生成最终 Skill / 报告，并保存。
+
+  必须遵守：
+  - 不要调用 get_novel_chapter 读取原文正文。
+  - 不要把所有 batch 原文式展开到最终回复。
+  - 最终回复只返回产物 object_key 和摘要。
+  - 正式 Skill 正文应该 source_free，不要把源书角色名、章节号、book_id 写成方法论主体。
+
+tools:
+  - name: McpHttpToolset
+    args:
+      transport: streamable_http
+      http_connection_params:
+        endpoint: ${NOVEL_SPLITTER_MCP_ENDPOINT}
+        headers:
+          Authorization: "Bearer ${NOVEL_SPLITTER_MCP_TOKEN}"
+      tool_filter:
+        - list_skill_batches
+        - get_skill_batch
+        - save_skill_batch
+        - merge_skill_batches
+skills:
+  - novel-writing-skill-extraction
+  - novel-cross-chapter-skill-distillation
+  - novel-skill-publication

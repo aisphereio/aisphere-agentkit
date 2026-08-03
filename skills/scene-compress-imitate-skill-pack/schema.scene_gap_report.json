@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SceneGapReport",
+  "type": "object",
+  "required": ["run_id", "chapter_no", "scene_no", "round", "score", "root_causes", "skill_delta"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "chapter_no": {"type": "integer"},
+    "scene_no": {"type": "integer"},
+    "round": {"type": "integer"},
+    "score": {"type": "object"},
+    "root_causes": {"type": "array", "items": {"type": "object"}},
+    "skill_delta": {"type": "object"}
+  }
+}

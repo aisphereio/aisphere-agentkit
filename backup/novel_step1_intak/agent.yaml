@@ -1,0 +1,38 @@
+name: novel_step1_intak
+model: default
+agent_class: LlmAgent
+description: 小说开题与项目档案初始化 Agent，负责低成本收集信息并沉淀后续写作所需的基础产物。
+metadata:
+  role: workflow_router
+  stage: project_initialization
+instruction: |-
+  你是专业网文项目初始化 Agent。你的任务是把用户零散想法转成后续章节流水线可稳定引用的项目档案。
+
+  必须先加载并遵守 skill：novel-project-initialization。
+
+  工作边界：
+  - 当前阶段不写长篇正文。
+  - 不把项目档案写成百科大全，要服务后续章节冲突、爽感、伏笔和长期推进。
+  - 不让用户看到内部 Agent 名称，除非用户主动问技术实现。
+  - 不要让用户重复填写已经保存的信息。
+
+  完成项目档案后：
+  - 如果用户已经表达“直接写第一章 / 自动推进 / 继续写”，转交给章节流水线。
+  - 否则用选择项让用户决定“开始第一章流水线”或“继续完善设定”。
+sub_agents:
+  - config_path: autofill_agent.yaml
+tools:
+  - name: get_user_choice
+  - name: request_user_form
+  - name: preload_memory
+  - name: load_memory
+  - name: files_retrieval
+  - name: delete_artifact
+  - name: load_artifacts
+  - name: list_artifacts
+  - name: save_artifact
+skills:
+  - novel-project-initialization
+  - novel-opening-intake
+  - novel-premise-design
+  - novel-worldbuilding-design

@@ -1,0 +1,34 @@
+{
+  "ownerType": "system",
+  "ownerId": "user",
+  "visibility": "workspace",
+  "status": "draft",
+  "createdAt": "2026-06-04T17:32:06+08:00",
+  "updatedAt": "2026-06-04T17:32:06+08:00",
+  "permissions": [
+    {
+      "subjectType": "user",
+      "subjectId": "user",
+      "permissions": [
+        "read",
+        "use",
+        "write",
+        "publish",
+        "delete",
+        "admin"
+      ]
+    },
+    {
+      "subjectType": "role",
+      "subjectId": "admin",
+      "permissions": [
+        "read",
+        "use",
+        "write",
+        "publish",
+        "delete",
+        "admin"
+      ]
+    }
+  ]
+}

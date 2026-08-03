@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SkillOverlayContext",
+  "type": "object",
+  "required": ["overlay_id", "source", "scope", "priority", "use_for", "skills", "global_constraints"],
+  "properties": {
+    "overlay_id": {"type": "string"},
+    "source": {"type": "string"},
+    "scope": {"type": "object"},
+    "priority": {"type": "string"},
+    "use_for": {"type": "string"},
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["skill_name", "trigger", "procedure", "why_it_fixes_gap", "anti_pattern", "acceptance_check"],
+        "properties": {
+          "skill_name": {"type": "string"},
+          "trigger": {"type": "string"},
+          "procedure": {"type": "array", "items": {"type": "string"}},
+          "why_it_fixes_gap": {"type": "string"},
+          "anti_pattern": {"type": "string"},
+          "acceptance_check": {"type": "string"}
+        }
+      }
+    },
+    "global_constraints": {"type": "array", "items": {"type": "string"}}
+  }
+}

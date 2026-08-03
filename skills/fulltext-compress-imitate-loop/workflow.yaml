@@ -1,0 +1,93 @@
+id: fulltext-compress-imitate-loop
+name: 全文压缩仿写闭环
+version: 0.1.0
+purpose: 输入全文，压缩结构与知识点，隔离仿写，对比差距并提炼写作 Skill。
+
+input:
+  supported:
+    - pasted_full_text
+    - upload_id
+    - source_artifact
+    - book_id_with_chapters
+  defaults:
+    chunk_strategy: auto
+    max_concurrency: 5
+    imitation_length: 2000
+
+stages:
+  - id: init_run
+    type: session_workspace
+    action: session_workspace_init_run
+
+  - id: ingest_source
+    type: source_intake
+    tools:
+      - upload_get
+      - upload_preview
+      - upload_attach_artifact
+      - book_split_from_artifact
+      - book_get_manifest
+      - book_get_chapter
+
+  - id: chunk_compress
+    type: fan_out
+    worker: fulltext_compression_worker
+    context_mode: fresh
+    workspace_mode: fork_commit
+    max_concurrency: 5
+    outputs:
+      - batch_summary.json
+      - batch_analysis.md
+      - skill_delta.json
+      - current_skill.md
+
+  - id: distill
+    type: sub_agent
+    worker: fulltext_skill_distiller
+    outputs:
+      - current/compressed_brief.md
+      - current/knowledge_map.json
+      - current/style_fingerprint.json
+      - current/imitation_brief.md
+      - current/skill_candidates.md
+
+  - id: isolated_imitation
+    type: sub_agent
+    worker: fulltext_imitation_writer
+    source_access: forbidden
+    inputs:
+      - current/imitation_brief.md
+      - current/knowledge_map.json
+      - current/style_fingerprint.json
+      - current/skill_candidates.md
+    outputs:
+      - current/imitation_draft.md
+      - current/imitation_meta.json
+
+  - id: gap_eval
+    type: sub_agent
+    worker: fulltext_gap_evaluator
+    outputs:
+      - current/gap_report.json
+      - current/gap_report.md
+      - current/skill_delta_after_gap.md
+      - current/next_iteration_plan.md
+
+  - id: optional_save_skill
+    type: human_decision
+    tools:
+      - skill_validate_draft
+      - skill_save_draft
+
+quality_rules:
+  forbid_raw_source_in_final: true
+  imitation_source_free: true
+  require_gap_scores: true
+  require_actionable_skill_delta: true
+  require_originality_risk_check: true
+  forbidden_generic_phrases:
+    - 文笔更好
+    - 增强代入感
+    - 推动剧情
+    - 塑造人物
+    - 内容丰富

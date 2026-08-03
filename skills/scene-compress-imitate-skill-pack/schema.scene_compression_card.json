@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SceneCompressionCard",
+  "type": "object",
+  "required": ["run_id", "book_id", "chapter_no", "scene_no", "scene_label", "surface_facts", "conflict_engine", "information_flow", "style_parameters", "imitation_brief", "candidate_skills", "non_copy_constraints"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "book_id": {"type": "string"},
+    "chapter_no": {"type": "integer"},
+    "scene_no": {"type": "integer"},
+    "scene_label": {"type": "string"},
+    "source_span": {"type": "object"},
+    "scene_size": {"type": "object"},
+    "surface_facts": {"type": "object"},
+    "conflict_engine": {"type": "object"},
+    "information_flow": {"type": "array", "items": {"type": "object"}},
+    "style_parameters": {"type": "object"},
+    "imitation_brief": {"type": "object"},
+    "candidate_skills": {"type": "array", "items": {"type": "object"}},
+    "non_copy_constraints": {"type": "array", "items": {"type": "string"}}
+  }
+}
