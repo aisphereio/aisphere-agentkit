@@ -472,6 +472,13 @@ func newMCPToolsetFromConfig(ctx context.Context, args map[string]any) (tool.Too
 	return mcpSet, nil
 }
 
+// NewMCPToolset exposes the platform MCP registry adapter to RuntimePlan
+// assemblers. Agent YAML and Hub snapshots use the same server-id based
+// contract; keeping construction here avoids a second transport implementation.
+func NewMCPToolset(ctx context.Context, args map[string]any) (tool.Toolset, error) {
+	return newMCPToolsetFromConfig(ctx, args)
+}
+
 func optionalToolFilter(v any) tool.Predicate {
 	items := anySliceToStrings(v)
 	if len(items) == 0 {

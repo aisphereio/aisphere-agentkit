@@ -11,8 +11,16 @@ import (
 	"time"
 
 	"google.golang.org/adk/internal/aihubruntime"
+	"google.golang.org/adk/internal/builtinruntime"
+	"google.golang.org/adk/internal/mcpruntime"
+	"google.golang.org/adk/internal/runtimeconfig"
+	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/internal/sandboxclient"
+	"google.golang.org/adk/internal/sandboxruntime"
 	"google.golang.org/adk/internal/sessionworkerclient"
+	"google.golang.org/adk/internal/skillruntime"
+	"google.golang.org/adk/internal/toolruntime"
+	"google.golang.org/adk/tool"
 )
 
 type Manager struct {
@@ -26,23 +34,29 @@ type Manager struct {
 	UserID         string
 	DefaultProfile string
 	ReadyTimeout   time.Duration
+	GoRunner       bool
+	RuntimeConfig  *runtimeconfig.Config
 
 	mu     sync.Mutex
 	leases map[string]*SessionLease
 }
 
 type CreateSessionRequest struct {
-	AppName     string
-	UserID      string
-	SessionID   string
-	ProjectID   string
-	AgentID     string
-	SnapshotID  string
-	Profile     string
-	TemplateRef string
-	WarmPoolRef string
-	Reuse       bool
-	State       map[string]any
+	AppName           string
+	UserID            string
+	SessionID         string
+	ProjectID         string
+	AgentID           string
+	SnapshotID        string
+	Profile           string
+	TemplateRef       string
+	WarmPoolRef       string
+	Version           string
+	ApprovalConfirmed bool
+	ApprovedTools     []string
+	SkipAgentResolve  bool
+	Reuse             bool
+	State             map[string]any
 }
 
 type SessionLease struct {
@@ -51,6 +65,8 @@ type SessionLease struct {
 	SnapshotID string
 	Profile    string
 	Sandbox    *sandboxclient.Lease
+	Plan       *runtimeplan.RuntimePlan
+	SkillRoot  string
 }
 
 func (m *Manager) Enabled() bool { return m != nil && m.Sandbox != nil }
@@ -72,7 +88,9 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	}
 	key := cacheKey(agentID, req.UserID, req.SessionID)
 	m.mu.Lock()
-	if existing := m.leases[key]; existing != nil && existing.Sandbox != nil && existing.Sandbox.WorkerEndpoint != "" {
+	if existing := m.leases[key]; existing != nil && existing.Sandbox != nil &&
+		(existing.Sandbox.WorkerEndpoint != "" || (m.GoRunner && existing.Sandbox.ToolsEndpoint != "")) &&
+		(req.SkipAgentResolve || m.Hub == nil || !m.Hub.Enabled() || existing.Plan != nil) {
 		m.mu.Unlock()
 		return existing, nil
 	}
@@ -83,9 +101,12 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	warmPoolRef := strings.TrimSpace(req.WarmPoolRef)
 	snapshotID := strings.TrimSpace(req.SnapshotID)
 	var snapshot *aihubruntime.AgentSnapshot
+	var plan *runtimeplan.RuntimePlan
 
-	if m.Hub != nil && m.Hub.Enabled() {
-		snap, err := m.Hub.ResolveAgentSnapshot(ctx, agentID, req.SessionID)
+	if m.Hub != nil && m.Hub.Enabled() && !req.SkipAgentResolve {
+		snap, err := m.Hub.ResolveAgentSnapshotWithOptions(ctx, agentID, req.SessionID, aihubruntime.AgentResolveOptions{
+			Version: req.Version, ApprovalConfirmed: req.ApprovalConfirmed, ApprovedTools: req.ApprovedTools,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("resolve Hub agent snapshot: %w", err)
 		}
@@ -94,7 +115,12 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 				return nil, err
 			}
 		}
+		agentPlan, err := runtimeplan.FromSnapshot(snap)
+		if err != nil {
+			return nil, fmt.Errorf("build runtime plan: %w", err)
+		}
 		snapshot = snap
+		plan = agentPlan
 		if snap.AgentID != "" {
 			agentID = snap.AgentID
 		}
@@ -121,29 +147,10 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 			"files":      snapshot.Definition.Files,
 			"model":      resolvedModelSpec(snapshot),
 		}
-		allowedTools := make([]string, 0, len(snapshot.Tools))
-		toolSchemas := make([]map[string]interface{}, 0, len(snapshot.Tools))
-		skillRefs := make([]map[string]string, 0, len(snapshot.Skills))
-		for _, item := range snapshot.Tools {
-			if strings.TrimSpace(item.Name) != "" {
-				allowedTools = append(allowedTools, strings.TrimSpace(item.Name))
-				toolSchemas = append(toolSchemas, map[string]interface{}{
-					"name":        item.Name,
-					"description": toolDescription(item),
-					"inputSchema": item.InputSchema,
-					"version":     item.Version,
-					"revision":    item.Revision,
-				})
-			}
-		}
-		for _, item := range snapshot.Skills {
-			if strings.TrimSpace(item.Name) != "" {
-				skillRefs = append(skillRefs, map[string]string{"name": item.Name, "version": item.Version})
-			}
-		}
-		metadata["allowedTools"] = allowedTools
-		metadata["toolSchemas"] = toolSchemas
-		metadata["skillRefs"] = skillRefs
+		metadata["runtimePlan"] = runtimePlanMetadata(plan)
+		metadata["allowedTools"] = allowedTools(plan, snapshot)
+		metadata["toolSchemas"] = toolSchemas(plan, snapshot)
+		metadata["skillRefs"] = skillRefs(plan, snapshot)
 		metadata["snapshotPolicy"] = snapshot.Policy
 	}
 	lease, err := m.Sandbox.Ensure(ctx, sandboxclient.EnsureRequest{
@@ -163,7 +170,7 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	if err != nil {
 		return nil, err
 	}
-	if lease.WorkerEndpoint == "" {
+	if lease.WorkerEndpoint == "" && (!m.GoRunner || lease.ToolsEndpoint == "") {
 		timeout := m.ReadyTimeout
 		if timeout <= 0 {
 			timeout = 90 * time.Second
@@ -175,21 +182,37 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 			return nil, err
 		}
 	}
-	if lease.WorkerEndpoint == "" {
+	if m.GoRunner && lease.ToolsEndpoint == "" {
+		return nil, fmt.Errorf("sandbox %s has no tools endpoint", lease.SandboxID)
+	}
+	if !m.GoRunner && lease.WorkerEndpoint == "" {
 		return nil, fmt.Errorf("sandbox %s has no worker endpoint", lease.SandboxID)
 	}
-	w := sessionworkerclient.New(lease.WorkerEndpoint, lease.LeaseToken)
-	readyCtx, cancel := context.WithTimeout(ctx, m.readyTimeout())
-	defer cancel()
-	if err := waitWorkerReady(readyCtx, w, time.Second); err != nil {
-		return nil, err
+	if !m.GoRunner {
+		w := sessionworkerclient.New(lease.WorkerEndpoint, lease.LeaseToken)
+		readyCtx, cancel := context.WithTimeout(ctx, m.readyTimeout())
+		defer cancel()
+		if err := waitWorkerReady(readyCtx, w, time.Second); err != nil {
+			return nil, err
+		}
 	}
 	if snapshot != nil {
 		if err := m.materializeSnapshot(ctx, lease, snapshot); err != nil {
 			return nil, err
 		}
 	}
-	out := &SessionLease{SessionID: req.SessionID, AgentID: agentID, SnapshotID: snapshotID, Profile: profile, Sandbox: lease}
+	skillRoot := ""
+	if m.GoRunner && snapshot != nil && len(snapshot.Skills) > 0 {
+		if strings.TrimSpace(m.SkillsRoot) == "" {
+			return nil, fmt.Errorf("GoRunner requires a configured skills root")
+		}
+		var err error
+		skillRoot, err = aihubruntime.PrepareAgentSnapshotSkillRoot(m.SkillsRoot, snapshot)
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := &SessionLease{SessionID: req.SessionID, AgentID: agentID, SnapshotID: snapshotID, Profile: profile, Sandbox: lease, Plan: plan, SkillRoot: skillRoot}
 	m.mu.Lock()
 	if m.leases == nil {
 		m.leases = map[string]*SessionLease{}
@@ -415,6 +438,47 @@ func (m *Manager) WorkerClient(lease *SessionLease) (*sessionworkerclient.Client
 	return sessionworkerclient.New(lease.Sandbox.WorkerEndpoint, lease.Sandbox.LeaseToken), nil
 }
 
+func (m *Manager) ToolRegistryForLease(lease *SessionLease) (*toolruntime.Registry, error) {
+	if m == nil || m.Sandbox == nil {
+		return nil, fmt.Errorf("native sandbox client is not configured")
+	}
+	if lease == nil || lease.Sandbox == nil || strings.TrimSpace(lease.Sandbox.SandboxID) == "" {
+		return nil, fmt.Errorf("session has no sandbox lease")
+	}
+	registry := toolruntime.New()
+	if err := registry.Register("sandbox", sandboxruntime.Resolver{
+		Caller: m.Sandbox, SandboxID: lease.Sandbox.SandboxID, SnapshotID: lease.SnapshotID, SessionID: lease.SessionID,
+	}); err != nil {
+		return nil, err
+	}
+	if m.RuntimeConfig != nil {
+		if err := registry.Register("internal", builtinruntime.Resolver{Config: m.RuntimeConfig}); err != nil {
+			return nil, err
+		}
+		if err := registry.RegisterToolset("mcp", mcpruntime.Resolver{Config: m.RuntimeConfig}); err != nil {
+			return nil, err
+		}
+	}
+	return registry, nil
+}
+
+func (m *Manager) ToolsetsForLease(ctx context.Context, lease *SessionLease) ([]tool.Toolset, error) {
+	if lease == nil || lease.Plan == nil || len(lease.Plan.Skills) == 0 {
+		return nil, nil
+	}
+	if strings.TrimSpace(lease.SkillRoot) == "" {
+		return nil, fmt.Errorf("session has no materialized runtime skill root")
+	}
+	set, err := skillruntime.NewToolset(ctx, lease.SkillRoot, lease.Plan.Skills)
+	if err != nil {
+		return nil, err
+	}
+	if set == nil {
+		return nil, nil
+	}
+	return []tool.Toolset{set}, nil
+}
+
 func (l *SessionLease) StateDelta() map[string]any {
 	if l == nil || l.Sandbox == nil {
 		return nil
@@ -434,6 +498,7 @@ func (l *SessionLease) StateDelta() map[string]any {
 			"browserEndpoint": l.Sandbox.BrowserEndpoint,
 			"workspace":       l.Sandbox.Workspace,
 			"expiresAt":       l.Sandbox.ExpiresAt,
+			"runtimePlan":     runtimePlanMetadata(l.Plan),
 		},
 	}
 }

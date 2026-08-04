@@ -12,6 +12,8 @@ import (
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/internal/aihubruntime"
+	"google.golang.org/adk/internal/modelruntime"
+	"google.golang.org/adk/internal/runtimeexecutor"
 	"google.golang.org/adk/internal/sessionnative"
 	"google.golang.org/adk/internal/sessionworkerclient"
 	"google.golang.org/adk/server/adkrest/internal/models"
@@ -22,7 +24,14 @@ func (c *RuntimeAPIController) runNativeAgent(ctx context.Context, req models.Ru
 	if err := c.validateSessionExists(ctx, req.AppName, req.UserId, req.SessionId); err != nil {
 		return nil, err
 	}
-	lease, worker, err := c.ensureNativeWorker(ctx, req)
+	lease, err := c.ensureNativeLease(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if c.nativeGoRunnerEnabled() {
+		return c.runNativeAgentGo(ctx, req, lease)
+	}
+	worker, err := c.nativeManager.WorkerClient(lease)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +99,16 @@ func (c *RuntimeAPIController) runNativeAgentSSE(rw http.ResponseWriter, req *ht
 		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
 		return
 	}
-	lease, worker, err := c.ensureNativeWorker(ctx, runReq)
+	lease, err := c.ensureNativeLease(ctx, runReq)
+	if err != nil {
+		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
+		return
+	}
+	if c.nativeGoRunnerEnabled() {
+		c.runNativeAgentGoSSE(rc, rw, ctx, runReq, lease, invocationID)
+		return
+	}
+	worker, err := c.nativeManager.WorkerClient(lease)
 	if err != nil {
 		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
 		return
@@ -160,19 +178,30 @@ func (c *RuntimeAPIController) runNativeAgentSSE(rw http.ResponseWriter, req *ht
 	_ = flashEventWithID(rc, rw, "", `{"adkRunDone":true,"nativeSandbox":true}`, c.sseTimeout)
 }
 
-func (c *RuntimeAPIController) ensureNativeWorker(ctx context.Context, req models.RunAgentRequest) (*sessionnative.SessionLease, *sessionworkerclient.Client, error) {
+func (c *RuntimeAPIController) ensureNativeLease(ctx context.Context, req models.RunAgentRequest) (*sessionnative.SessionLease, error) {
 	if c.nativeManager == nil || !c.nativeManager.Enabled() {
-		return nil, nil, fmt.Errorf("native sandbox session manager is disabled")
+		return nil, fmt.Errorf("native sandbox session manager is disabled")
 	}
 	lease, err := c.nativeManager.EnsureSession(ctx, sessionnative.CreateSessionRequest{
-		AppName:   req.AppName,
-		UserID:    req.UserId,
-		SessionID: req.SessionId,
-		ProjectID: firstNativeNonEmpty(req.ProjectId, req.ProjectID),
-		AgentID:   req.AppName,
-		State:     stateDeltaToMap(req.StateDelta),
-		Reuse:     true,
+		AppName:           req.AppName,
+		UserID:            req.UserId,
+		SessionID:         req.SessionId,
+		ProjectID:         firstNativeNonEmpty(req.ProjectId, req.ProjectID),
+		AgentID:           req.AppName,
+		Version:           req.Version,
+		ApprovalConfirmed: req.ApprovalConfirmed,
+		ApprovedTools:     req.ApprovedTools,
+		State:             stateDeltaToMap(req.StateDelta),
+		Reuse:             true,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return lease, nil
+}
+
+func (c *RuntimeAPIController) ensureNativeWorker(ctx context.Context, req models.RunAgentRequest) (*sessionnative.SessionLease, *sessionworkerclient.Client, error) {
+	lease, err := c.ensureNativeLease(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -181,6 +210,108 @@ func (c *RuntimeAPIController) ensureNativeWorker(ctx context.Context, req model
 		return nil, nil, err
 	}
 	return lease, worker, nil
+}
+
+func (c *RuntimeAPIController) nativeGoRunnerEnabled() bool {
+	return c != nil && c.runtimeConfig != nil && c.runtimeConfig.Skills.AIHub.Sandbox.GoRunner
+}
+
+func (c *RuntimeAPIController) runNativeAgentGo(ctx context.Context, req models.RunAgentRequest, lease *sessionnative.SessionLease) ([]models.Event, error) {
+	if lease == nil || lease.Plan == nil {
+		return nil, fmt.Errorf("native Go runner requires a Hub runtime plan")
+	}
+	message := contentText(req.NewMessage)
+	if strings.TrimSpace(message) == "" {
+		return nil, fmt.Errorf("native Go runner requires a text message")
+	}
+	llm, _, err := modelruntime.NewModel(ctx, lease.Plan.Model)
+	if err != nil {
+		return nil, fmt.Errorf("resolve native Go runner model: %w", err)
+	}
+	toolRegistry, err := c.nativeManager.ToolRegistryForLease(lease)
+	if err != nil {
+		return nil, err
+	}
+	toolsets, err := c.nativeManager.ToolsetsForLease(ctx, lease)
+	if err != nil {
+		return nil, fmt.Errorf("resolve native Go runner skills: %w", err)
+	}
+	invocationID := req.InvocationId
+	if invocationID == "" {
+		invocationID = newRuntimeInvocationID()
+	}
+	executor := runtimeexecutor.Executor{
+		Model: llm, SessionService: c.sessionService, ToolRegistry: toolRegistry,
+		Toolsets:          toolsets,
+		AutoCreateSession: c.autoCreateSession,
+	}
+	var out []models.Event
+	for event, err := range executor.Run(ctx, runtimeexecutor.RunRequest{
+		Plan: lease.Plan, AppName: req.AppName, UserID: req.UserId, SessionID: req.SessionId,
+		Message: message, InvocationID: invocationID, StateDelta: stateDeltaToMap(req.StateDelta),
+	}) {
+		if err != nil {
+			return nil, fmt.Errorf("native Go runner failed: %w", err)
+		}
+		if event != nil {
+			out = append(out, models.FromSessionEvent(*event))
+		}
+	}
+	return out, nil
+}
+
+func (c *RuntimeAPIController) runNativeAgentGoSSE(rc *http.ResponseController, rw http.ResponseWriter, ctx context.Context, req models.RunAgentRequest, lease *sessionnative.SessionLease, invocationID string) {
+	if lease == nil || lease.Plan == nil {
+		_ = flashErrorEvent(rc, rw, fmt.Errorf("native Go runner requires a Hub runtime plan"), c.sseTimeout)
+		return
+	}
+	message := contentText(req.NewMessage)
+	if strings.TrimSpace(message) == "" {
+		_ = flashErrorEvent(rc, rw, fmt.Errorf("native Go runner requires a text message"), c.sseTimeout)
+		return
+	}
+	llm, _, err := modelruntime.NewModel(ctx, lease.Plan.Model)
+	if err != nil {
+		_ = flashErrorEvent(rc, rw, fmt.Errorf("resolve native Go runner model: %w", err), c.sseTimeout)
+		return
+	}
+	toolRegistry, err := c.nativeManager.ToolRegistryForLease(lease)
+	if err != nil {
+		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
+		return
+	}
+	toolsets, err := c.nativeManager.ToolsetsForLease(ctx, lease)
+	if err != nil {
+		_ = flashErrorEvent(rc, rw, fmt.Errorf("resolve native Go runner skills: %w", err), c.sseTimeout)
+		return
+	}
+	executor := runtimeexecutor.Executor{
+		Model: llm, SessionService: c.sessionService, ToolRegistry: toolRegistry,
+		Toolsets:          toolsets,
+		AutoCreateSession: c.autoCreateSession,
+	}
+	for event, err := range executor.Run(ctx, runtimeexecutor.RunRequest{
+		Plan: lease.Plan, AppName: req.AppName, UserID: req.UserId, SessionID: req.SessionId,
+		Message: message, InvocationID: invocationID, Streaming: true, StateDelta: stateDeltaToMap(req.StateDelta),
+	}) {
+		if err != nil {
+			_ = flashErrorEvent(rc, rw, fmt.Errorf("native Go runner failed: %w", err), c.sseTimeout)
+			return
+		}
+		if event == nil {
+			continue
+		}
+		data, err := json.Marshal(models.FromSessionEvent(*event))
+		if err != nil {
+			_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
+			return
+		}
+		if err := flashEvent(rc, rw, string(data), c.sseTimeout); err != nil {
+			log.Printf("failed to flash native Go runner event: %v", err)
+			return
+		}
+	}
+	_ = flashEventWithID(rc, rw, "", `{"adkRunDone":true,"nativeGoRunner":true}`, c.sseTimeout)
 }
 
 func nativeWorkerEventToModelEvent(ev sessionworkerclient.Event, invocationID string) models.Event {

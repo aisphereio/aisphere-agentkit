@@ -263,6 +263,7 @@ type AIHubSandboxConfig struct {
 	// AgentKit keeps session/run metadata and proxies messages/events; the worker
 	// owns the real agent execution environment under /workspace.
 	NativeSession       bool   `mapstructure:"native_session" yaml:"native_session"`
+	GoRunner            bool   `mapstructure:"go_runner" yaml:"go_runner"`
 	AdapterEndpoint     string `mapstructure:"adapter_endpoint" yaml:"adapter_endpoint"`
 	AdapterToken        string `mapstructure:"adapter_token" yaml:"adapter_token"`
 	AdapterTokenEnv     string `mapstructure:"adapter_token_env" yaml:"adapter_token_env"`
@@ -693,6 +694,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("skills.aihub.sandbox.mode", cfg.Skills.AIHub.Sandbox.Mode)
 	v.SetDefault("skills.aihub.sandbox.sessions_root", cfg.Skills.AIHub.Sandbox.SessionsRoot)
 	v.SetDefault("skills.aihub.sandbox.readonly_skill_mount", cfg.Skills.AIHub.Sandbox.ReadonlySkillMount)
+	v.SetDefault("skills.aihub.sandbox.go_runner", cfg.Skills.AIHub.Sandbox.GoRunner)
 }
 
 func (c *Config) normalize(cwd string) {

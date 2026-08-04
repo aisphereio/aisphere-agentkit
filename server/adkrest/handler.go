@@ -243,6 +243,8 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 		SkillsRoot:     cfg.Skills.Root,
 		DefaultProfile: sb.DefaultProfile,
 		ReadyTimeout:   readyTimeout,
+		GoRunner:       sb.GoRunner,
+		RuntimeConfig:  cfg,
 	}, nil
 }
 

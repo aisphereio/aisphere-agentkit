@@ -63,6 +63,7 @@ This fork contains additional platformization documents for the ADK Go backend:
 - `docs/backend-platform-postgres-storage.md` — P1.3 PostgreSQL storage backend, auto-create database, and verification steps.
 - `docs/backend-platform-implementation-plan.md` — long-running implementation roadmap.
 - `docs/backend-platform-handoff.md` — handoff notes for the next development agent/Codex session.
+- `docs/go-runner-closed-loop.md` — Hub snapshot、skill/tool/MCP 装配、权限闸门和 GoRunner 闭环运行说明。
 
 
 ## 📄 License
