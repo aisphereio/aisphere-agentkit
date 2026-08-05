@@ -34,6 +34,10 @@ type cookieHeaderContextKey struct{}
 type requestHeadersContextKey struct{}
 
 var forwardedPrincipalHeaders = []string{
+	// Hub production authn verifies this signed principal token. Runtime must
+	// carry it across the single control-plane resolve call so the Hub sees
+	// the same user that initiated the run in the browser.
+	"X-Aisphere-Principal-JWT",
 	"X-Aisphere-Auth-Verified",
 	"X-Aisphere-Subject",
 	"X-Aisphere-Subject-Type",
@@ -984,6 +988,10 @@ func (c *Client) applyForwardedPrincipalHeaders(req *http.Request) {
 		return
 	}
 	values := requestHeadersFromContext(req.Context())
+	if token := strings.TrimSpace(values["X-Aisphere-Principal-JWT"]); token != "" {
+		req.Header.Set("X-Aisphere-Principal-JWT", token)
+		return
+	}
 	if !strings.EqualFold(values["X-Aisphere-Auth-Verified"], "true") || strings.TrimSpace(values["X-Aisphere-Subject"]) == "" {
 		return
 	}
