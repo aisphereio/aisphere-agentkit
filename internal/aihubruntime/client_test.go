@@ -2,8 +2,11 @@ package aihubruntime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"google.golang.org/adk/internal/runtimeconfig"
@@ -59,7 +62,14 @@ func TestResolveAgentSnapshotFallsBackToKernelizedV1Hub(t *testing.T) {
 		if r.URL.Path != "/v1/agents/research-agent:resolve" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"snapshotId":"v1-snap","runtimeId":"runtime-1","sessionId":"session-1","agentId":"research-agent","agentVersion":"v1","agentRevision":"rev-v1","policy":"principal_passthrough_iam_enforced","definition":{"entryPoint":"root_agent.yaml","files":{"root_agent.yaml":"name: research-agent\n"}},"model":{"profile":"coding-default","model":"glm-5.2"},"tools":[{"name":"workspace.read","version":"v1","revision":"tool-rev","inputSchema":{"type":"object"}}]}`))
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request["approvalConfirmed"] != true || request["version"] != "v1" {
+			t.Fatalf("approval options were not forwarded: %+v", request)
+		}
+		_, _ = w.Write([]byte(`{"snapshotId":"v1-snap","runtimeId":"runtime-1","sessionId":"session-1","agentId":"research-agent","agentVersion":"v1","agentRevision":"rev-v1","policy":"principal_passthrough_iam_enforced","definition":{"entryPoint":"root_agent.yaml","files":{"root_agent.yaml":"name: research-agent\n"}},"model":{"profile":"coding-default","model":"glm-5.2"},"authorization":{"approvalConfirmed":true,"tools":[{"tool":"workspace.read","approvalMode":"always","approved":true}]},"tools":[{"name":"workspace.read","version":"v1","revision":"tool-rev","inputSchema":{"type":"object"}}]}`))
 	}))
 	defer server.Close()
 
@@ -67,7 +77,9 @@ func TestResolveAgentSnapshotFallsBackToKernelizedV1Hub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	snapshot, err := client.ResolveAgentSnapshot(context.Background(), "research-agent", "session-1")
+	snapshot, err := client.ResolveAgentSnapshotWithOptions(context.Background(), "research-agent", "session-1", AgentResolveOptions{
+		ApprovalConfirmed: true, ApprovedTools: []string{"workspace.read"}, Version: "v1",
+	})
 	if err != nil {
 		t.Fatalf("ResolveAgentSnapshot() error = %v", err)
 	}
@@ -76,6 +88,9 @@ func TestResolveAgentSnapshotFallsBackToKernelizedV1Hub(t *testing.T) {
 	}
 	if snapshot.Model.Profile != "coding-default" || snapshot.Model.Model != "glm-5.2" {
 		t.Fatalf("unexpected model snapshot: %+v", snapshot.Model)
+	}
+	if !snapshot.Authorization["approvalConfirmed"].(bool) {
+		t.Fatalf("authorization was not preserved: %+v", snapshot.Authorization)
 	}
 }
 
@@ -91,5 +106,30 @@ func TestCookieForwardingIsLimitedToHubEndpoint(t *testing.T) {
 	client.applyCookieHeader(ctx, externalRequest)
 	if got := externalRequest.Header.Get("Cookie"); got != "" {
 		t.Fatalf("external Cookie = %q, want empty", got)
+	}
+}
+
+func TestPrepareAgentSnapshotSkillRootUsesPinnedCache(t *testing.T) {
+	root := t.TempDir()
+	cache := filepath.Join(root, ".aihub", "skills", "demo", "versions", "v1")
+	if err := os.MkdirAll(filepath.Join(cache, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "SKILL.md"), []byte("---\nname: demo\n---\nUse demo."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "references", "guide.md"), []byte("guide"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &AgentSnapshot{SnapshotID: "snap-1", SessionID: "session-1", Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", CachePath: cache}}}
+	got, err := PrepareAgentSnapshotSkillRoot(root, snapshot)
+	if err != nil {
+		t.Fatalf("PrepareAgentSnapshotSkillRoot() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(got, "demo", "SKILL.md")); err != nil {
+		t.Fatalf("materialized SKILL.md missing: %v", err)
+	}
+	if snapshot.Skills[0].MountPath == "" {
+		t.Fatal("snapshot skill mount path is empty")
 	}
 }

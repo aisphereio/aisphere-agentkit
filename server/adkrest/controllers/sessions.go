@@ -89,7 +89,8 @@ func (c *SessionsAPIController) CreateSessionHandler(rw http.ResponseWriter, req
 	if c.nativeManager != nil && c.nativeManager.Enabled() {
 		ctx := aihubruntime.WithRequestHeaders(aihubruntime.WithCookieHeader(req.Context(), req.Header.Get("Cookie")), req.Header)
 		lease, err := c.nativeManager.CreateSession(ctx, sessionnative.CreateSessionRequest{
-			AppName: sessionID.AppName, UserID: sessionID.UserID, SessionID: sessionID.ID, ProjectID: projectID, AgentID: sessionID.AppName, State: createSessionRequest.State, Reuse: true,
+			AppName: sessionID.AppName, UserID: sessionID.UserID, SessionID: sessionID.ID, ProjectID: projectID,
+			AgentID: sessionID.AppName, State: createSessionRequest.State, SkipAgentResolve: true, Reuse: true,
 		})
 		if err != nil {
 			http.Error(rw, "failed to create native sandbox session: "+err.Error(), http.StatusInternalServerError)

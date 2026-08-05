@@ -35,6 +35,13 @@ type RunAgentRequest struct {
 
 	InvocationId string `json:"invocationId,omitempty"`
 
+	// Approval fields are forwarded to Hub when the agent snapshot is resolved.
+	// Runtime never grants permission locally; it only carries the user's
+	// explicit per-run decision to the control plane.
+	Version           string   `json:"version,omitempty"`
+	ApprovalConfirmed bool     `json:"approvalConfirmed,omitempty"`
+	ApprovedTools     []string `json:"approvedTools,omitempty"`
+
 	// ProjectId/ProjectID are platform-layer hints. They are copied into session
 	// state and used to mount the selected workspace before the model/tool loop.
 	// Agents should work with the mounted workspace rather than reason about this id.

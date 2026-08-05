@@ -235,6 +235,7 @@ type AgentSnapshot struct {
 	Model         ModelSpec           `json:"model,omitempty"`
 	Skills        []SkillSnapshotItem `json:"skills"`
 	Tools         []ToolSnapshotItem  `json:"tools,omitempty"`
+	Authorization map[string]any      `json:"authorization,omitempty"`
 }
 
 type AgentListItem struct {
@@ -276,9 +277,12 @@ type resolveSessionResponse struct {
 }
 
 type resolveAgentRequest struct {
-	RuntimeID string `json:"runtimeId"`
-	SessionID string `json:"sessionId"`
-	Policy    string `json:"policy"`
+	RuntimeID         string   `json:"runtimeId"`
+	SessionID         string   `json:"sessionId"`
+	Policy            string   `json:"policy"`
+	Version           string   `json:"version,omitempty"`
+	ApprovalConfirmed bool     `json:"approvalConfirmed,omitempty"`
+	ApprovedTools     []string `json:"approvedTools,omitempty"`
 }
 
 // resolveAgentV1Request is the newer Hub Agent HTTP contract. Keep it
@@ -290,6 +294,15 @@ type resolveAgentV1Request struct {
 	Version           string   `json:"version,omitempty"`
 	ApprovalConfirmed bool     `json:"approvalConfirmed,omitempty"`
 	ApprovedTools     []string `json:"approvedTools,omitempty"`
+}
+
+// AgentResolveOptions carries the caller's run approval decision into Hub.
+// Hub remains the authorization authority; Runtime only forwards this decision
+// and consumes the resulting immutable snapshot.
+type AgentResolveOptions struct {
+	Version           string
+	ApprovalConfirmed bool
+	ApprovedTools     []string
 }
 
 type resolveAgentResponse struct {
@@ -306,6 +319,7 @@ type resolveAgentResponse struct {
 	Model         ModelSpec          `json:"model,omitempty"`
 	Skills        []skillRef         `json:"skills"`
 	Tools         []ToolSnapshotItem `json:"tools,omitempty"`
+	Authorization map[string]any     `json:"authorization,omitempty"`
 }
 
 func New(cfg runtimeconfig.AIHubSkillConfig) (*Client, error) {
@@ -411,6 +425,12 @@ func (c *Client) ResolveSessionSnapshot(ctx context.Context, root, sessionID str
 // one session. Hub evaluates Agent and Skill permissions from the forwarded
 // authenticated browser session.
 func (c *Client) ResolveAgentSnapshot(ctx context.Context, agentID, sessionID string) (*AgentSnapshot, error) {
+	return c.ResolveAgentSnapshotWithOptions(ctx, agentID, sessionID, AgentResolveOptions{})
+}
+
+// ResolveAgentSnapshotWithOptions asks Hub to authorize and pin an Agent
+// definition for one session, including an explicit per-run approval decision.
+func (c *Client) ResolveAgentSnapshotWithOptions(ctx context.Context, agentID, sessionID string, options AgentResolveOptions) (*AgentSnapshot, error) {
 	if c == nil || !c.cfg.Enabled {
 		return nil, fmt.Errorf("aihub client is disabled")
 	}
@@ -418,7 +438,11 @@ func (c *Client) ResolveAgentSnapshot(ctx context.Context, agentID, sessionID st
 	if agentID == "" {
 		return nil, fmt.Errorf("agent id is required")
 	}
-	request := resolveAgentRequest{RuntimeID: c.runtimeID(), SessionID: strings.TrimSpace(sessionID), Policy: "pinned_authorized"}
+	request := resolveAgentRequest{
+		RuntimeID: c.runtimeID(), SessionID: strings.TrimSpace(sessionID), Policy: "pinned_authorized",
+		Version: options.Version, ApprovalConfirmed: options.ApprovalConfirmed,
+		ApprovedTools: options.ApprovedTools,
+	}
 	body, _ := json.Marshal(request)
 	var response resolveAgentResponse
 	path := "/v3/aihub/runtime/agents/" + url.PathEscape(agentID) + "/resolve"
@@ -429,7 +453,11 @@ func (c *Client) ResolveAgentSnapshot(ctx context.Context, agentID, sessionID st
 		// New Kernelized Hub exposes the same immutable resolve concept under
 		// /v1. Its authorization remains Hub-owned; Runtime only adapts the
 		// transport shape and never falls back on permission failures.
-		v1Request, _ := json.Marshal(resolveAgentV1Request{RuntimeID: c.runtimeID(), SessionID: strings.TrimSpace(sessionID)})
+		v1Request, _ := json.Marshal(resolveAgentV1Request{
+			RuntimeID: c.runtimeID(), SessionID: strings.TrimSpace(sessionID),
+			Version: options.Version, ApprovalConfirmed: options.ApprovalConfirmed,
+			ApprovedTools: options.ApprovedTools,
+		})
 		if v1Err := c.doJSON(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(agentID)+":resolve", bytes.NewReader(v1Request), &response); v1Err != nil {
 			return nil, fmt.Errorf("resolve agent via legacy and v1 Hub contracts: legacy=%v; v1=%w", err, v1Err)
 		}
@@ -446,7 +474,13 @@ func (c *Client) ResolveAgentSnapshot(ctx context.Context, agentID, sessionID st
 	if modelSpecEmpty(model) {
 		model = response.Definition.Model
 	}
-	return &AgentSnapshot{SnapshotID: response.SnapshotID, RuntimeID: response.RuntimeID, SessionID: response.SessionID, AgentID: response.AgentID, AgentVersion: response.AgentVersion, AgentRevision: response.AgentRevision, GeneratedAt: response.GeneratedAt, Policy: response.Policy, Definition: response.Definition, Sandbox: sandbox, Model: model, Skills: items, Tools: response.Tools}, nil
+	return &AgentSnapshot{
+		SnapshotID: response.SnapshotID, RuntimeID: response.RuntimeID, SessionID: response.SessionID,
+		AgentID: response.AgentID, AgentVersion: response.AgentVersion, AgentRevision: response.AgentRevision,
+		GeneratedAt: response.GeneratedAt, Policy: response.Policy, Definition: response.Definition,
+		Sandbox: sandbox, Model: model, Skills: items, Tools: response.Tools,
+		Authorization: response.Authorization,
+	}, nil
 }
 
 func modelSpecEmpty(model ModelSpec) bool {
@@ -477,6 +511,59 @@ func (c *Client) CacheAgentSnapshotSkills(ctx context.Context, root string, snap
 		}
 	}
 	return nil
+}
+
+// PrepareAgentSnapshotSkillRoot materializes exactly the skill versions in an
+// Agent snapshot into an isolated Runtime-side root. This is used by the
+// in-process GoRunner; sandbox workers use their own .aisphere/skills mount.
+// The session-specific root prevents one session's pinned skill set from
+// changing another session's skill context.
+func PrepareAgentSnapshotSkillRoot(root string, snapshot *AgentSnapshot) (string, error) {
+	if snapshot == nil {
+		return "", fmt.Errorf("agent snapshot is required")
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("skill cache root is required")
+	}
+	key := safePath(firstNonEmpty(snapshot.SessionID, snapshot.SnapshotID))
+	destination := filepath.Join(root, ".aihub", "sessions", key, "runtime-skills")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return "", fmt.Errorf("create runtime skill root: %w", err)
+	}
+	for i := range snapshot.Skills {
+		item := &snapshot.Skills[i]
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		source := strings.TrimSpace(item.CachePath)
+		if source == "" {
+			source = filepath.Join(root, safePath(name))
+		}
+		if _, err := os.Stat(filepath.Join(source, skillservice.SkillFileName)); err != nil {
+			return "", fmt.Errorf("skill %s@%s is not materialized at %s: %w", name, item.Version, source, err)
+		}
+		target := filepath.Join(destination, safePath(name))
+		tmp := target + ".tmp"
+		if err := os.RemoveAll(tmp); err != nil {
+			return "", fmt.Errorf("clear temporary skill root %s: %w", name, err)
+		}
+		if err := copyDir(source, tmp); err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", fmt.Errorf("copy skill %s@%s: %w", name, item.Version, err)
+		}
+		if err := os.RemoveAll(target); err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", fmt.Errorf("replace skill %s: %w", name, err)
+		}
+		if err := os.Rename(tmp, target); err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", fmt.Errorf("activate skill %s: %w", name, err)
+		}
+		item.MountPath = filepath.ToSlash(filepath.Join(".aihub", "sessions", key, "runtime-skills", safePath(name)))
+	}
+	return destination, nil
 }
 
 // ListAgents returns the Agent identifiers that Hub has already filtered for
