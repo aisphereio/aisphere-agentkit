@@ -36,6 +36,9 @@ func TestResolveAgentSnapshotForwardsSessionCookie(t *testing.T) {
 		if r.URL.Path != "/v3/aihub/runtime/agents/research-agent/resolve" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
+		if got := r.Header.Get("X-Aisphere-Principal-JWT"); got != "signed-principal" {
+			t.Fatalf("principal JWT = %q, want signed-principal", got)
+		}
 		_, _ = w.Write([]byte(`{"snapshotId":"agent-snap-1","runtimeId":"runtime-1","sessionId":"session-1","agentId":"research-agent","agentVersion":"1.0.0","agentRevision":"revision-1","policy":"pinned_authorized","definition":{"entryPoint":"root_agent.yaml","files":{"root_agent.yaml":"name: research-agent\n"}},"skills":[]}`))
 	}))
 	defer server.Close()
@@ -44,7 +47,10 @@ func TestResolveAgentSnapshotForwardsSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	snapshot, err := client.ResolveAgentSnapshot(WithCookieHeader(context.Background(), "aisphere_session=session-1"), "research-agent", "session-1")
+	forwarded := make(http.Header)
+	forwarded.Set("X-Aisphere-Principal-JWT", "signed-principal")
+	ctx := WithRequestHeaders(context.Background(), forwarded)
+	snapshot, err := client.ResolveAgentSnapshot(WithCookieHeader(ctx, "aisphere_session=session-1"), "research-agent", "session-1")
 	if err != nil {
 		t.Fatalf("ResolveAgentSnapshot() error = %v", err)
 	}
@@ -106,6 +112,21 @@ func TestCookieForwardingIsLimitedToHubEndpoint(t *testing.T) {
 	client.applyCookieHeader(ctx, externalRequest)
 	if got := externalRequest.Header.Get("Cookie"); got != "" {
 		t.Fatalf("external Cookie = %q, want empty", got)
+	}
+}
+
+func TestForwardedPrincipalJWTIsApplied(t *testing.T) {
+	client := &Client{}
+	forwarded := make(http.Header)
+	forwarded.Set("X-Aisphere-Principal-JWT", "signed-principal")
+	ctx := WithRequestHeaders(context.Background(), forwarded)
+	if got := requestHeadersFromContext(ctx)["X-Aisphere-Principal-JWT"]; got != "signed-principal" {
+		t.Fatalf("context principal JWT = %q, want signed-principal", got)
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://hub.example.test/healthz", nil).WithContext(ctx)
+	client.applyForwardedPrincipalHeaders(req)
+	if got := req.Header.Get("X-Aisphere-Principal-JWT"); got != "signed-principal" {
+		t.Fatalf("principal JWT = %q, want signed-principal", got)
 	}
 }
 
