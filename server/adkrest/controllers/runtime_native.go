@@ -8,14 +8,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/internal/aihubruntime"
 	"google.golang.org/adk/internal/modelruntime"
 	"google.golang.org/adk/internal/runtimeexecutor"
 	"google.golang.org/adk/internal/sessionnative"
-	"google.golang.org/adk/internal/sessionworkerclient"
 	"google.golang.org/adk/server/adkrest/internal/models"
 )
 
@@ -28,51 +26,7 @@ func (c *RuntimeAPIController) runNativeAgent(ctx context.Context, req models.Ru
 	if err != nil {
 		return nil, err
 	}
-	if c.nativeGoRunnerEnabled() {
-		return c.runNativeAgentGo(ctx, req, lease)
-	}
-	worker, err := c.nativeManager.WorkerClient(lease)
-	if err != nil {
-		return nil, err
-	}
-	message := contentText(req.NewMessage)
-	if strings.TrimSpace(message) == "" {
-		return nil, fmt.Errorf("native sandbox worker currently requires a text message")
-	}
-	invocationID := req.InvocationId
-	if invocationID == "" {
-		invocationID = newRuntimeInvocationID()
-	}
-	resp, err := worker.SendMessage(ctx, sessionworkerclient.MessageRequest{
-		RunID:   invocationID,
-		Message: message,
-		Metadata: map[string]interface{}{
-			"appName":      req.AppName,
-			"userId":       req.UserId,
-			"sessionId":    req.SessionId,
-			"projectId":    firstNativeNonEmpty(req.ProjectId, req.ProjectID),
-			"sandboxId":    lease.Sandbox.SandboxID,
-			"snapshotId":   lease.SnapshotID,
-			"native":       true,
-			"invocationId": invocationID,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	runID := invocationID
-	if resp != nil && strings.TrimSpace(resp.RunID) != "" {
-		runID = strings.TrimSpace(resp.RunID)
-	}
-	events, err := worker.Events(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]models.Event, 0, len(events))
-	for _, ev := range events {
-		out = append(out, nativeWorkerEventToModelEvent(ev, invocationID))
-	}
-	return out, nil
+	return c.runNativeAgentGo(ctx, req, lease)
 }
 
 func (c *RuntimeAPIController) runNativeAgentSSE(rw http.ResponseWriter, req *http.Request, runReq models.RunAgentRequest) {
@@ -88,7 +42,13 @@ func (c *RuntimeAPIController) runNativeAgentSSE(rw http.ResponseWriter, req *ht
 		http.Error(rw, "failed to flush headers", http.StatusInternalServerError)
 		return
 	}
-	metadata, _ := json.Marshal(map[string]any{"adkRunMetadata": true, "invocationId": invocationID, "cursor": "", "nativeSandbox": true})
+	metadata, _ := json.Marshal(map[string]any{
+		"adkRunMetadata": true,
+		"invocationId":   invocationID,
+		"cursor":         "",
+		"nativeSandbox":  true,
+		"runtimeEngine":  "adk-go",
+	})
 	if err := flashEventWithID(rc, rw, "", string(metadata), c.sseTimeout); err != nil {
 		log.Printf("failed to write native invocation metadata %s: %v", invocationID, err)
 		return
@@ -104,78 +64,7 @@ func (c *RuntimeAPIController) runNativeAgentSSE(rw http.ResponseWriter, req *ht
 		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
 		return
 	}
-	if c.nativeGoRunnerEnabled() {
-		c.runNativeAgentGoSSE(rc, rw, ctx, runReq, lease, invocationID)
-		return
-	}
-	worker, err := c.nativeManager.WorkerClient(lease)
-	if err != nil {
-		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
-		return
-	}
-	message := contentText(runReq.NewMessage)
-	if strings.TrimSpace(message) == "" {
-		_ = flashErrorEvent(rc, rw, fmt.Errorf("native sandbox worker currently requires a text message"), c.sseTimeout)
-		return
-	}
-	resp, err := worker.SendMessage(ctx, sessionworkerclient.MessageRequest{
-		RunID:   invocationID,
-		Message: message,
-		Metadata: map[string]interface{}{
-			"appName":      runReq.AppName,
-			"userId":       runReq.UserId,
-			"sessionId":    runReq.SessionId,
-			"projectId":    firstNativeNonEmpty(runReq.ProjectId, runReq.ProjectID),
-			"sandboxId":    lease.Sandbox.SandboxID,
-			"snapshotId":   lease.SnapshotID,
-			"native":       true,
-			"invocationId": invocationID,
-		},
-	})
-	if err != nil {
-		_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
-		return
-	}
-	runID := invocationID
-	if resp != nil && strings.TrimSpace(resp.RunID) != "" {
-		runID = strings.TrimSpace(resp.RunID)
-	}
-	idleLimit := 2
-	if c.runtimeConfig != nil && c.runtimeConfig.Skills.AIHub.Sandbox.EventIdleSeconds > 0 {
-		idleLimit = c.runtimeConfig.Skills.AIHub.Sandbox.EventIdleSeconds
-	}
-	idle := 0
-	for {
-		events, err := worker.Events(ctx, runID)
-		if err != nil {
-			_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
-			return
-		}
-		if len(events) == 0 {
-			idle++
-			if idle >= idleLimit {
-				break
-			}
-			continue
-		}
-		idle = 0
-		for _, ev := range events {
-			modelEvent := nativeWorkerEventToModelEvent(ev, invocationID)
-			data, err := json.Marshal(modelEvent)
-			if err != nil {
-				_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
-				return
-			}
-			if err := flashEvent(rc, rw, string(data), c.sseTimeout); err != nil {
-				log.Printf("failed to flash native worker event: %v", err)
-				return
-			}
-		}
-		if nativeRunComplete(events) {
-			break
-		}
-	}
-	_ = flashEventWithID(rc, rw, "", `{"adkRunDone":true,"nativeSandbox":true}`, c.sseTimeout)
+	c.runNativeAgentGoSSE(rc, rw, ctx, runReq, lease, invocationID)
 }
 
 func (c *RuntimeAPIController) ensureNativeLease(ctx context.Context, req models.RunAgentRequest) (*sessionnative.SessionLease, error) {
@@ -198,22 +87,6 @@ func (c *RuntimeAPIController) ensureNativeLease(ctx context.Context, req models
 		return nil, err
 	}
 	return lease, nil
-}
-
-func (c *RuntimeAPIController) ensureNativeWorker(ctx context.Context, req models.RunAgentRequest) (*sessionnative.SessionLease, *sessionworkerclient.Client, error) {
-	lease, err := c.ensureNativeLease(ctx, req)
-	if err != nil {
-		return nil, nil, err
-	}
-	worker, err := c.nativeManager.WorkerClient(lease)
-	if err != nil {
-		return nil, nil, err
-	}
-	return lease, worker, nil
-}
-
-func (c *RuntimeAPIController) nativeGoRunnerEnabled() bool {
-	return c != nil && c.runtimeConfig != nil && c.runtimeConfig.Skills.AIHub.Sandbox.GoRunner
 }
 
 func (c *RuntimeAPIController) runNativeAgentGo(ctx context.Context, req models.RunAgentRequest, lease *sessionnative.SessionLease) ([]models.Event, error) {
@@ -311,39 +184,7 @@ func (c *RuntimeAPIController) runNativeAgentGoSSE(rc *http.ResponseController, 
 			return
 		}
 	}
-	_ = flashEventWithID(rc, rw, "", `{"adkRunDone":true,"nativeGoRunner":true}`, c.sseTimeout)
-}
-
-func nativeWorkerEventToModelEvent(ev sessionworkerclient.Event, invocationID string) models.Event {
-	author := "agentkit-session-worker"
-	role := "model"
-	if ev.Type == "user_message" {
-		author = "user"
-		role = "user"
-	}
-	text := ev.Content
-	if strings.TrimSpace(text) == "" && ev.Data != nil {
-		b, _ := json.Marshal(ev.Data)
-		text = string(b)
-	}
-	return models.Event{
-		ID:           "native-" + uuid.NewString(),
-		InvocationID: invocationID,
-		Author:       author,
-		Content:      &genai.Content{Role: role, Parts: []*genai.Part{{Text: text}}},
-		TurnComplete: ev.Type == "assistant_message" || ev.Type == "error" || ev.Type == "run_done",
-		Actions:      models.EventActions{StateDelta: map[string]any{"__native_worker_event__": map[string]any{"type": ev.Type, "runId": ev.RunID, "createdAt": ev.CreatedAt}}},
-	}
-}
-
-func nativeRunComplete(events []sessionworkerclient.Event) bool {
-	for _, ev := range events {
-		switch ev.Type {
-		case "assistant_message", "error", "run_done", "assistant_done":
-			return true
-		}
-	}
-	return false
+	_ = flashEventWithID(rc, rw, "", `{"adkRunDone":true,"runtimeEngine":"adk-go"}`, c.sseTimeout)
 }
 
 func contentText(content genai.Content) string {
