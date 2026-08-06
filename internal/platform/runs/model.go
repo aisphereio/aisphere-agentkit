@@ -215,39 +215,6 @@ func (e *RuntimeEvent) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
-// Step is the legacy coarse-grained timeline model. New execution code should
-// append RuntimeEvent records instead. It remains during API migration only.
-type Step struct {
-	ID           string     `json:"id" gorm:"primaryKey;size:64"`
-	TenantID     string     `json:"tenant_id" gorm:"index;size:128;not null"`
-	RunID        string     `json:"run_id" gorm:"index;size:64;not null"`
-	Kind         string     `json:"kind" gorm:"index;size:64;not null"`
-	Status       string     `json:"status" gorm:"index;size:64;not null"`
-	PayloadJSON  string     `json:"payload_json,omitempty" gorm:"type:text"`
-	ErrorMessage string     `json:"error_message,omitempty" gorm:"type:text"`
-	StartedAt    time.Time  `json:"started_at" gorm:"precision:6"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty" gorm:"precision:6"`
-	CreatedAt    time.Time  `json:"created_at" gorm:"precision:6"`
-	UpdatedAt    time.Time  `json:"updated_at" gorm:"precision:6"`
-}
-
-func (Step) TableName() string {
-	return "run_steps"
-}
-
-func (s *Step) BeforeCreate(tx *gorm.DB) error {
-	if s.ID == "" {
-		s.ID = uuid.NewString()
-	}
-	if s.Status == "" {
-		s.Status = StatusRunning
-	}
-	if s.StartedAt.IsZero() {
-		s.StartedAt = time.Now().UTC()
-	}
-	return nil
-}
-
 // AutoMigrate uses versioned explicit DDL in PostgreSQL. GORM AutoMigrate is
 // retained only for SQLite-backed tests and local ephemeral development stores.
 func AutoMigrate(db *gorm.DB) error {
@@ -259,6 +226,5 @@ func AutoMigrate(db *gorm.DB) error {
 		&ExecutionSnapshot{},
 		&RunAttempt{},
 		&RuntimeEvent{},
-		&Step{},
 	)
 }
