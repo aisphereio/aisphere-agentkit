@@ -47,7 +47,6 @@ import (
 	"google.golang.org/adk/memory"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/server/adkrest/controllers"
-	"google.golang.org/adk/server/adkrest/internal/resumable"
 	"google.golang.org/adk/server/adkrest/internal/routers"
 	"google.golang.org/adk/server/adkrest/internal/services"
 	"google.golang.org/adk/session"
@@ -61,15 +60,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create debug telemetry service: %w", err)
 	}
-	var runStore *resumable.Store
 	var subAgentObserveStore controllers.SubAgentTaskObserveStore
 	if cfg.RuntimeConfig != nil {
 		redisCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		runStore, err = resumable.NewRedisStore(redisCtx, cfg.RuntimeConfig.Server.API.ResumableRuns)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create resumable run store: %w", err)
-		}
 		observeTTL := parseDurationDefault(cfg.RuntimeConfig.Runtime.SubAgentTasks.ObserveTTL, 6*time.Hour)
 		subAgentObserveStore, err = controllers.NewBestEffortSubAgentTaskObserveStore(redisCtx, cfg.RuntimeConfig.Server.API.ResumableRuns, observeTTL)
 		if err != nil {
@@ -160,7 +154,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		false,
 		cfg.RuntimeConfig,
 		cfg.TraceRecorder,
-		runStore,
 		platformUploadService,
 		subAgentObserveStore,
 		nativeSessionManager,
