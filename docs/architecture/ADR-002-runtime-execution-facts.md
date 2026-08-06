@@ -28,9 +28,13 @@ Run
   └── RuntimeEvent 1..N（append-only）
 ```
 
+只有 Runtime 执行引擎可以创建和修改这些事实。Console/API 仅提供查询和事件订阅，不提供创建 Snapshot、Attempt、Event 或修改 Run 状态的公开写接口。
+
 ### Run
 
 表示用户发起的逻辑任务。Retry 不修改 Snapshot，而是创建新的 Attempt。
+
+同一租户内使用 `idempotency_key` 防止网络重放创建重复 Run。已经处于 queued、running、waiting_approval 或成功终态的 Run 不允许创建新的 Attempt。
 
 ### ExecutionSnapshot
 
@@ -55,6 +59,8 @@ Snapshot 不得包含：
 
 Snapshot Repository 不提供 Update 操作。
 
+敏感字段识别需覆盖 snake_case、kebab-case 和 camelCase，但不得把 Tool JSON Schema 中名为 `token`、`password` 的属性定义误判为凭据值。
+
 ### RunAttempt
 
 表示一次物理执行。保存 Runtime build、compiler version、compiled plan digest、Sandbox lease reference 与失败信息。
@@ -64,6 +70,21 @@ Snapshot Repository 不提供 Update 操作。
 ### RuntimeEvent
 
 RuntimeEvent 是追加写事实，使用 `(run_id, sequence)` 唯一约束。SSE、审计时间线和调试界面都从 Event Ledger 投影，不再把 Controller 内存或 SSE 连接作为事实源。
+
+ADK Event 必须先写入 Event Ledger，成功取得 sequence 后才能向客户端投影。
+
+### 终态事务
+
+Attempt 终态、Run 终态和两条 terminal events 必须在同一个数据库事务中提交：
+
+```text
+Attempt.status
++ Run.status
++ attempt.completed|failed|cancelled
++ run.completed|failed|cancelled
+```
+
+不允许出现 Run 已成功但 `run.completed` 缺失的半状态。
 
 ## 状态机
 
@@ -104,17 +125,35 @@ runtime_run_attempts
 runtime_events
 ```
 
-旧的 pgx `platform_runs/platform_run_events` 是重复事实源，将在 Runtime Controller 完成新链路接入后删除。迁移期间新事实接口对旧 pgx Store fail closed，禁止双写。
+旧的 pgx `platform_runs/platform_run_events` 是重复事实源。Runtime 启动链已经统一使用 GORM Store；旧 pgx 实现和 `run_steps` 将作为后续删除项，不允许新增调用或双写。
 
-## SSE
+## 查询与 SSE
 
-SSE cursor 等于 RuntimeEvent.sequence：
+只读查询：
 
 ```http
-GET /v1/runs/{runId}/events?after=128
+GET /platform/runs/{runId}
+GET /platform/runs/{runId}/snapshot
+GET /platform/runs/{runId}/attempts
+GET /platform/runs/{runId}/events?after=128
 ```
 
-客户端断线后从最后确认的 sequence 继续读取。Redis 只能作为加速层或短期 continuation，不能成为历史事实源。
+可恢复 SSE：
+
+```http
+GET /platform/runs/{runId}/events/stream?after=128
+Last-Event-ID: 128
+```
+
+SSE `id` 等于 RuntimeEvent.sequence。客户端断线后从最后确认的 sequence 继续读取；连接跨 Runtime 重启仍可恢复。Redis 只能作为短期加速层或 continuation buffer，不能成为历史事实源。
+
+公开路由不再注册：
+
+```text
+POST /platform/runs
+PATCH /platform/runs/{runId}
+POST/PATCH run_steps
+```
 
 ## 摘要
 
@@ -128,23 +167,27 @@ parse one JSON value
 -> sha256
 ```
 
-相同语义、不同 key 顺序必须得到相同 digest。
+相同语义、不同 key 顺序必须得到相同 digest。不同 Run 可以拥有 digest 相同但记录独立的 Snapshot。
 
 ## 迁移顺序
 
-1. 建立事实模型、状态机和单元测试。
-2. 将 Run Store 统一到 GORM/PostgreSQL。
-3. Runtime Controller 在执行前创建 Run、Snapshot 和 Attempt。
-4. ADK Event 映射并追加 RuntimeEvent。
-5. SSE 改为 Event Ledger 投影与重放。
-6. 删除旧 pgx Run Store、`run_steps` 和 Controller 内存事实。
+1. 建立事实模型、状态机和单元测试。已完成。
+2. 将 Runtime 启动链统一到 GORM Store。已完成。
+3. Native ADK-Go 在模型调用前创建 Run、Snapshot 和 Attempt。已完成。
+4. ADK Event 映射并追加 RuntimeEvent。已完成。
+5. SSE 改为 Event Ledger 投影与重放。已完成第一版。
+6. 增加显式 PostgreSQL DDL migration，替代生产 AutoMigrate。
+7. 删除旧 pgx Run Store、`run_steps` 和 Controller 兼容代码。
+8. 退役或迁移非 Native 旧 `/run` 执行路径。
 
 ## 验收标准
 
 - 一个 Run 只能绑定一个不可变 Snapshot。
 - Snapshot 在模型请求之前落库。
-- 每次 Retry 都创建新的 Attempt。
+- 每次合法 Retry 都创建新的 Attempt；活跃或成功 Run 不会被重复执行。
+- Attempt/Run 终态与 terminal events 原子提交。
 - RuntimeEvent sequence 单调递增并可用于 SSE 重放。
 - Runtime 重启后仍能查询 Run、Snapshot、Attempt 和 Event。
 - Snapshot 中不存在 credential value。
 - 不支持的 schema version 必须失败关闭。
+- 浏览器不能创建或篡改 Runtime 执行事实。
