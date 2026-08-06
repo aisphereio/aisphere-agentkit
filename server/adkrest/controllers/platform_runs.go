@@ -316,9 +316,5 @@ func writePlatformError(rw http.ResponseWriter, err error) {
 		http.Error(rw, err.Error(), http.StatusNotFound)
 		return
 	}
-	if errors.Is(err, platformruns.ErrLegacyPostgresExecutionFacts) {
-		http.Error(rw, err.Error(), http.StatusNotImplemented)
-		return
-	}
 	http.Error(rw, err.Error(), http.StatusInternalServerError)
 }
