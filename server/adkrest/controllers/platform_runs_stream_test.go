@@ -94,7 +94,7 @@ func TestStreamEventsHandlerResumesFromLastEventID(t *testing.T) {
 	controller.StreamEventsHandler(recorder, request)
 
 	response := recorder.Result()
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("StreamEventsHandler status=%d body=%s", response.StatusCode, recorder.Body.String())
 	}
