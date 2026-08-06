@@ -35,8 +35,9 @@ const (
 	runtimeEventHeartbeat    = 15 * time.Second
 )
 
-// PlatformRunsAPIController exposes Runtime execution facts. Snapshot, Attempt,
-// and Event endpoints are intentionally read-only; only Runtime may create them.
+// PlatformRunsAPIController exposes the read model for Runtime execution facts.
+// Run, Snapshot, Attempt and Event mutations are deliberately kept inside the
+// Runtime execution engine and are not public management APIs.
 type PlatformRunsAPIController struct {
 	service platformruns.Service
 }
@@ -70,12 +71,6 @@ func (c *PlatformRunsAPIController) ListRunsHandler(rw http.ResponseWriter, req 
 	EncodeJSONResponse(runs, http.StatusOK, rw)
 }
 
-// CreateRunHandler remains during route migration only. The public router no
-// longer registers it because execution facts must be created by Runtime.
-func (c *PlatformRunsAPIController) CreateRunHandler(rw http.ResponseWriter, req *http.Request) {
-	http.Error(rw, "runs are created by the Runtime execution engine", http.StatusMethodNotAllowed)
-}
-
 func (c *PlatformRunsAPIController) GetRunHandler(rw http.ResponseWriter, req *http.Request) {
 	if c.service == nil {
 		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
@@ -89,12 +84,6 @@ func (c *PlatformRunsAPIController) GetRunHandler(rw http.ResponseWriter, req *h
 		return
 	}
 	EncodeJSONResponse(run, http.StatusOK, rw)
-}
-
-// UpdateRunHandler remains during route migration only. Runtime owns all status
-// transitions and terminal facts.
-func (c *PlatformRunsAPIController) UpdateRunHandler(rw http.ResponseWriter, req *http.Request) {
-	http.Error(rw, "run state is managed by the Runtime execution engine", http.StatusMethodNotAllowed)
 }
 
 func (c *PlatformRunsAPIController) GetExecutionSnapshotHandler(rw http.ResponseWriter, req *http.Request) {
@@ -283,32 +272,6 @@ func isTerminalRuntimeEvent(eventType string) bool {
 	default:
 		return false
 	}
-}
-
-func (c *PlatformRunsAPIController) ListStepsHandler(rw http.ResponseWriter, req *http.Request) {
-	if c.service == nil {
-		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
-		return
-	}
-	p := auth.FromContext(req.Context())
-	runID := mux.Vars(req)["run_id"]
-	steps, err := c.service.ListSteps(req.Context(), p.TenantID, runID)
-	if err != nil {
-		writePlatformError(rw, err)
-		return
-	}
-	EncodeJSONResponse(steps, http.StatusOK, rw)
-}
-
-// CreateStepHandler is no longer registered. RuntimeEvent replaces mutable
-// coarse-grained steps as the execution timeline.
-func (c *PlatformRunsAPIController) CreateStepHandler(rw http.ResponseWriter, req *http.Request) {
-	http.Error(rw, "run steps are deprecated; Runtime writes append-only events", http.StatusMethodNotAllowed)
-}
-
-// UpdateStepHandler is no longer registered.
-func (c *PlatformRunsAPIController) UpdateStepHandler(rw http.ResponseWriter, req *http.Request) {
-	http.Error(rw, "run steps are deprecated; Runtime writes append-only events", http.StatusMethodNotAllowed)
 }
 
 func writePlatformError(rw http.ResponseWriter, err error) {
