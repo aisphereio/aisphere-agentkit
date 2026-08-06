@@ -68,4 +68,17 @@ func TestRunAllowsOnlyOneActiveAttemptAndRetriesAfterFailure(t *testing.T) {
 	if retry.AttemptNumber != 2 {
 		t.Fatalf("retry attempt number=%d, want 2", retry.AttemptNumber)
 	}
+	retriedRun, err := svc.GetRun(ctx, "default", run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after retry: %v", err)
+	}
+	if retriedRun.Status != StatusQueued {
+		t.Fatalf("retried run status=%q, want %q", retriedRun.Status, StatusQueued)
+	}
+	if retriedRun.FinishedAt != nil || retriedRun.CancelledAt != nil {
+		t.Fatalf("retried run retained terminal timestamps: %+v", retriedRun)
+	}
+	if retriedRun.FailureCode != "" || retriedRun.ErrorMessage != "" {
+		t.Fatalf("retried run retained failure details: %+v", retriedRun)
+	}
 }
