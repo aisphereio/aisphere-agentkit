@@ -47,7 +47,7 @@ const (
 // by RunAttempt records and always retain the same immutable ExecutionSnapshot.
 type Run struct {
 	ID               string     `json:"id" gorm:"primaryKey;size:64"`
-	TenantID         string     `json:"tenant_id" gorm:"index;size:128;not null"`
+	TenantID         string     `json:"tenant_id" gorm:"index;uniqueIndex:idx_runtime_runs_tenant_idempotency,priority:1;size:128;not null"`
 	ProjectID        string     `json:"project_id,omitempty" gorm:"index;size:128"`
 	ConversationID   string     `json:"conversation_id,omitempty" gorm:"index;size:128"`
 	AppName          string     `json:"app_name,omitempty" gorm:"index;size:256"`
@@ -98,7 +98,7 @@ type ExecutionSnapshot struct {
 	RunID            string    `json:"run_id" gorm:"uniqueIndex;size:64;not null"`
 	SchemaVersion    string    `json:"schema_version" gorm:"index;size:64;not null"`
 	SourceSpecDigest string    `json:"source_spec_digest" gorm:"size:128;not null"`
-	SnapshotDigest   string    `json:"snapshot_digest" gorm:"uniqueIndex;size:128;not null"`
+	SnapshotDigest   string    `json:"snapshot_digest" gorm:"index;size:128;not null"`
 	AgentID          string    `json:"agent_id,omitempty" gorm:"index;size:128"`
 	AgentRevision    string    `json:"agent_revision,omitempty" gorm:"size:128"`
 	ModelRevision    string    `json:"model_revision,omitempty" gorm:"size:128"`
@@ -170,16 +170,16 @@ func (a *RunAttempt) BeforeCreate(tx *gorm.DB) error {
 // RuntimeEvent is an append-only fact. Sequence is strictly increasing per Run
 // and is used as the resumable SSE cursor.
 type RuntimeEvent struct {
-	ID          string    `json:"id" gorm:"primaryKey;size:64"`
-	TenantID    string    `json:"tenant_id" gorm:"index;size:128;not null"`
-	RunID       string    `json:"run_id" gorm:"uniqueIndex:idx_runtime_event_sequence,priority:1;index;size:64;not null"`
-	AttemptID   string    `json:"attempt_id,omitempty" gorm:"index;size:64"`
-	Sequence    uint64    `json:"sequence" gorm:"uniqueIndex:idx_runtime_event_sequence,priority:2;not null"`
-	EventType   string    `json:"event_type" gorm:"index;size:128;not null"`
-	EventVersion string   `json:"event_version" gorm:"size:64;not null"`
-	PayloadJSON string    `json:"payload_json,omitempty" gorm:"type:text"`
-	TraceID     string    `json:"trace_id,omitempty" gorm:"index;size:128"`
-	CreatedAt   time.Time `json:"created_at" gorm:"precision:6"`
+	ID           string    `json:"id" gorm:"primaryKey;size:64"`
+	TenantID     string    `json:"tenant_id" gorm:"index;size:128;not null"`
+	RunID        string    `json:"run_id" gorm:"uniqueIndex:idx_runtime_event_sequence,priority:1;index;size:64;not null"`
+	AttemptID    string    `json:"attempt_id,omitempty" gorm:"index;size:64"`
+	Sequence     uint64    `json:"sequence" gorm:"uniqueIndex:idx_runtime_event_sequence,priority:2;not null"`
+	EventType    string    `json:"event_type" gorm:"index;size:128;not null"`
+	EventVersion string    `json:"event_version" gorm:"size:64;not null"`
+	PayloadJSON  string    `json:"payload_json,omitempty" gorm:"type:text"`
+	TraceID      string    `json:"trace_id,omitempty" gorm:"index;size:128"`
+	CreatedAt    time.Time `json:"created_at" gorm:"precision:6"`
 }
 
 func (RuntimeEvent) TableName() string {
