@@ -58,11 +58,11 @@ func (c *RuntimeAPIController) executionFactService() platformruns.Service {
 }
 
 type executionFactContext struct {
-	TenantID  string
-	Run       *platformruns.Run
-	Snapshot  *platformruns.ExecutionSnapshot
-	Attempt   *platformruns.RunAttempt
-	TraceID   string
+	TenantID string
+	Run      *platformruns.Run
+	Snapshot *platformruns.ExecutionSnapshot
+	Attempt  *platformruns.RunAttempt
+	TraceID  string
 }
 
 func (c *RuntimeAPIController) beginNativeExecutionFacts(
@@ -103,21 +103,21 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 	sourceSpecDigest := platformruns.SnapshotDigest(canonicalPlan)
 
 	snapshotEnvelope := map[string]any{
-		"schemaVersion": platformruns.ExecutionSnapshotSchemaV1,
-		"sourceSpec": json.RawMessage(canonicalPlan),
+		"schemaVersion":   platformruns.ExecutionSnapshotSchemaV1,
+		"sourceSpec":      json.RawMessage(canonicalPlan),
 		"sourceSpecDigest": sourceSpecDigest,
 		"principal": map[string]any{
-			"tenantId": tenantID,
+			"tenantId":    tenantID,
 			"principalId": principalID,
 		},
 		"request": map[string]any{
-			"appName": req.AppName,
-			"sessionId": req.SessionId,
-			"projectId": firstNativeNonEmpty(req.ProjectId, req.ProjectID),
+			"appName":      req.AppName,
+			"sessionId":    req.SessionId,
+			"projectId":    firstNativeNonEmpty(req.ProjectId, req.ProjectID),
 			"invocationId": invocationID,
 		},
 		"runtime": map[string]any{
-			"engine": "adk-go",
+			"engine":   "adk-go",
 			"resolver": "hub-runtime-plan/v1",
 		},
 	}
@@ -157,63 +157,67 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 	})
 	if err != nil {
 		_, _ = service.UpdateRun(ctx, tenantID, run.ID, platformruns.UpdateRunRequest{
-			Status: platformruns.StatusFailed, FailureCode: "SNAPSHOT_PERSIST_FAILED", ErrorMessage: err.Error(),
+			Status:       platformruns.StatusFailed,
+			FailureCode:  "SNAPSHOT_PERSIST_FAILED",
+			ErrorMessage: err.Error(),
 		})
 		return nil, fmt.Errorf("persist Runtime execution snapshot: %w", err)
 	}
 
 	attempt, err := service.CreateAttempt(ctx, platformruns.CreateAttemptRequest{
-		TenantID: tenantID,
-		RunID: run.ID,
-		RuntimeEngine: "adk-go",
+		TenantID:        tenantID,
+		RunID:           run.ID,
+		RuntimeEngine:   "adk-go",
 		CompilerVersion: "runtimeexecutor/v1",
 	})
 	if err != nil {
 		_, _ = service.UpdateRun(ctx, tenantID, run.ID, platformruns.UpdateRunRequest{
-			Status: platformruns.StatusFailed, FailureCode: "ATTEMPT_CREATE_FAILED", ErrorMessage: err.Error(),
+			Status:       platformruns.StatusFailed,
+			FailureCode:  "ATTEMPT_CREATE_FAILED",
+			ErrorMessage: err.Error(),
 		})
 		return nil, fmt.Errorf("create Runtime attempt: %w", err)
 	}
 
 	facts := &executionFactContext{
 		TenantID: tenantID,
-		Run: run,
+		Run:      run,
 		Snapshot: snapshot,
-		Attempt: attempt,
-		TraceID: invocationID,
+		Attempt:  attempt,
+		TraceID:  invocationID,
 	}
 	if _, err := facts.append(ctx, service, "run.created", map[string]any{
-		"runId": run.ID,
-		"snapshotId": snapshot.ID,
+		"runId":         run.ID,
+		"snapshotId":    snapshot.ID,
 		"snapshotDigest": snapshot.SnapshotDigest,
 	}); err != nil {
 		facts.fail(ctx, service, "EVENT_LEDGER_FAILED", err)
 		return nil, err
 	}
 	if _, err := facts.append(ctx, service, "attempt.queued", map[string]any{
-		"attemptId": attempt.ID,
+		"attemptId":     attempt.ID,
 		"attemptNumber": attempt.AttemptNumber,
 	}); err != nil {
 		facts.fail(ctx, service, "EVENT_LEDGER_FAILED", err)
 		return nil, err
 	}
 	if _, err := service.UpdateAttempt(ctx, tenantID, attempt.ID, platformruns.UpdateAttemptRequest{
-		Status: platformruns.AttemptStatusRunning,
+		Status:             platformruns.AttemptStatusRunning,
 		CompiledPlanDigest: sourceSpecDigest,
-		SandboxLeaseID: nativeSandboxID(lease),
+		SandboxLeaseID:     nativeSandboxID(lease),
 	}); err != nil {
 		facts.fail(ctx, service, "ATTEMPT_START_FAILED", err)
 		return nil, err
 	}
 	if _, err := service.UpdateRun(ctx, tenantID, run.ID, platformruns.UpdateRunRequest{
-		Status: platformruns.StatusRunning,
+		Status:           platformruns.StatusRunning,
 		CurrentAttemptID: attempt.ID,
 	}); err != nil {
 		facts.fail(ctx, service, "RUN_START_FAILED", err)
 		return nil, err
 	}
 	if _, err := facts.append(ctx, service, "attempt.started", map[string]any{
-		"attemptId": attempt.ID,
+		"attemptId":    attempt.ID,
 		"runtimeEngine": "adk-go",
 	}); err != nil {
 		facts.fail(ctx, service, "EVENT_LEDGER_FAILED", err)
@@ -257,12 +261,12 @@ func (f *executionFactContext) appendRaw(
 		return nil, fmt.Errorf("runtime execution facts are incomplete")
 	}
 	event, err := service.AppendEvent(ctx, platformruns.AppendEventRequest{
-		TenantID: f.TenantID,
-		RunID: f.Run.ID,
-		AttemptID: f.Attempt.ID,
-		EventType: eventType,
+		TenantID:    f.TenantID,
+		RunID:       f.Run.ID,
+		AttemptID:   f.Attempt.ID,
+		EventType:   eventType,
 		PayloadJSON: payloadJSON,
-		TraceID: f.TraceID,
+		TraceID:     f.TraceID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("append Runtime event %s: %w", eventType, err)
@@ -274,57 +278,44 @@ func (f *executionFactContext) succeed(ctx context.Context, service platformruns
 	if f == nil {
 		return nil
 	}
-	if _, err := f.append(ctx, service, "attempt.completed", map[string]any{
-		"attemptId": f.Attempt.ID,
-		"status": platformruns.AttemptStatusSucceeded,
-	}); err != nil {
-		return err
+	finalizer, ok := service.(platformruns.ExecutionFinalizer)
+	if !ok {
+		return fmt.Errorf("runtime execution fact store does not support atomic finalization")
 	}
-	if _, err := service.UpdateAttempt(ctx, f.TenantID, f.Attempt.ID, platformruns.UpdateAttemptRequest{
-		Status: platformruns.AttemptStatusSucceeded,
-	}); err != nil {
-		return fmt.Errorf("complete Runtime attempt: %w", err)
-	}
-	if _, err := service.UpdateRun(ctx, f.TenantID, f.Run.ID, platformruns.UpdateRunRequest{
-		Status: platformruns.StatusSucceeded,
-	}); err != nil {
-		return fmt.Errorf("complete Runtime run: %w", err)
-	}
-	_, err := f.append(ctx, service, "run.completed", map[string]any{
-		"runId": f.Run.ID,
-		"status": platformruns.StatusSucceeded,
+	_, err := finalizer.FinalizeExecution(ctx, platformruns.FinalizeExecutionRequest{
+		TenantID:  f.TenantID,
+		RunID:     f.Run.ID,
+		AttemptID: f.Attempt.ID,
+		Status:    platformruns.StatusSucceeded,
+		TraceID:   f.TraceID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("finalize successful Runtime execution: %w", err)
+	}
+	return nil
 }
 
 func (f *executionFactContext) fail(ctx context.Context, service platformruns.Service, code string, cause error) {
 	if f == nil || service == nil || cause == nil {
 		return
 	}
-	message := cause.Error()
-	if f.Attempt != nil {
-		_, _ = f.append(ctx, service, "attempt.failed", map[string]any{
-			"attemptId": f.Attempt.ID,
-			"failureCode": code,
-			"message": message,
-		})
-		_, _ = service.UpdateAttempt(ctx, f.TenantID, f.Attempt.ID, platformruns.UpdateAttemptRequest{
-			Status: platformruns.AttemptStatusFailed,
-			FailureCode: code,
-			ErrorMessage: message,
-		})
+	finalizer, ok := service.(platformruns.ExecutionFinalizer)
+	if !ok {
+		log.Printf("runtime run %s failure could not be finalized atomically [%s]: %v", runtimeFactRunID(f), code, cause)
+		return
 	}
-	if f.Run != nil {
-		_, _ = service.UpdateRun(ctx, f.TenantID, f.Run.ID, platformruns.UpdateRunRequest{
-			Status: platformruns.StatusFailed,
-			FailureCode: code,
-			ErrorMessage: message,
-		})
-		_, _ = f.append(ctx, service, "run.failed", map[string]any{
-			"runId": f.Run.ID,
-			"failureCode": code,
-			"message": message,
-		})
+	_, err := finalizer.FinalizeExecution(ctx, platformruns.FinalizeExecutionRequest{
+		TenantID:     f.TenantID,
+		RunID:        f.Run.ID,
+		AttemptID:    f.Attempt.ID,
+		Status:       platformruns.StatusFailed,
+		FailureCode:  code,
+		ErrorMessage: cause.Error(),
+		TraceID:      f.TraceID,
+	})
+	if err != nil {
+		log.Printf("runtime run %s failure finalization failed [%s]: %v (original: %v)", runtimeFactRunID(f), code, err, cause)
+		return
 	}
 	log.Printf("runtime run %s failed [%s]: %v", runtimeFactRunID(f), code, cause)
 }
