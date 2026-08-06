@@ -5,6 +5,7 @@
 ## 当前有效文档
 
 - [SYSTEM-BOUNDARIES.md](SYSTEM-BOUNDARIES.md) — AISphere 跨组件职责边界、对象 Owner 与协作契约。
+- [MODULE-CATALOG.md](MODULE-CATALOG.md) — Hub / Runtime / Sandbox / IAM / Model Gateway 的模块功能清单、接口和架构债务台账。
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md) — Runtime 只保留一套 ADK-Go Agent Loop。
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
 
@@ -15,6 +16,7 @@
 ```text
 Accepted ADR
   > SYSTEM-BOUNDARIES.md
+  > MODULE-CATALOG.md
   > 当前代码与 API contract
   > 其他说明文档
   > Git 历史中的旧设计
@@ -84,9 +86,10 @@ Redis resumable buffer 作为历史事实源
 新增架构文档前先判断：
 
 1. 是跨组件长期边界？更新 `SYSTEM-BOUNDARIES.md`。
-2. 是不可逆/高影响技术决策？新增 ADR。
-3. 是实现说明或运维指南？放普通 docs，但不得重新定义 Owner。
-4. 已被 Accepted ADR 否定的设计直接删除，Git history 即历史档案，不在主分支保留“可能有效”的冲突文档。
+2. 是模块职责、依赖或债务台账？更新 `MODULE-CATALOG.md`。
+3. 是不可逆/高影响技术决策？新增 ADR。
+4. 是实现说明或运维指南？放普通 docs，但不得重新定义 Owner。
+5. 已被 Accepted ADR 否定的设计直接删除，Git history 即历史档案，不在主分支保留“可能有效”的冲突文档。
 
 ## 当前开发顺序
 
@@ -101,4 +104,4 @@ Redis resumable buffer 作为历史事实源
 8. Context / Memory pipeline
 ```
 
-每一步都必须满足 `SYSTEM-BOUNDARIES.md` 中的架构不变量。
+每一步都必须满足 `SYSTEM-BOUNDARIES.md` 中的架构不变量，并同步维护 `MODULE-CATALOG.md` 的债务状态。
