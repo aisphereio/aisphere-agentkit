@@ -1,13 +1,14 @@
 # ADR-002: Runtime 执行事实模型
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-08-06
+- 收口日期：2026-08-07
 - 适用仓库：`aisphere-agentkit`
 - 依赖：ADR-001
 
 ## 背景
 
-现有 Runtime 同时存在：
+历史 Runtime 同时存在：
 
 - Controller 内临时运行状态；
 - Redis resumable run buffer；
@@ -110,28 +111,41 @@ queued -> running -> succeeded
 
 ## 持久化
 
-目标单一实现：
+唯一实现：
 
 ```text
 GORM + PostgreSQL
 ```
 
-表：
+当前事实表：
 
 ```text
 runtime_runs
 runtime_execution_snapshots
 runtime_run_attempts
 runtime_events
+runtime_schema_migrations
 ```
 
-旧的 pgx `platform_runs/platform_run_events` 是重复事实源。Runtime 启动链已经统一使用 GORM Store；旧 pgx 实现和 `run_steps` 将作为后续删除项，不允许新增调用或双写。
+已删除的历史事实模型：
+
+```text
+run_steps
+platform_runs
+platform_run_steps
+platform_run_events
+```
+
+Runtime 不允许重新引入第二 Run Store 或双写。
+
+PostgreSQL 使用显式、版本化 migration。SQLite 仅用于测试和本地 ephemeral store，可使用 GORM AutoMigrate。
 
 ## 查询与 SSE
 
 只读查询：
 
 ```http
+GET /platform/runs
 GET /platform/runs/{runId}
 GET /platform/runs/{runId}/snapshot
 GET /platform/runs/{runId}/attempts
@@ -145,17 +159,19 @@ GET /platform/runs/{runId}/events/stream?after=128
 Last-Event-ID: 128
 ```
 
-SSE `id` 等于 RuntimeEvent.sequence。客户端断线后从最后确认的 sequence 继续读取；连接跨 Runtime 重启仍可恢复。Redis 只能作为短期加速层或 continuation buffer，不能成为历史事实源。
+SSE `id` 等于 RuntimeEvent.sequence。客户端断线后从最后确认的 sequence 继续读取；连接跨 Runtime 重启仍可恢复。
 
-公开路由不再注册：
+Redis 只能作为短期缓存、锁或 continuation 加速层，不能成为历史事实源。旧 `/run_sse/resume` Redis 重放协议不再作为目标运行模型；RuntimeEvent Ledger 是标准恢复来源。
+
+公开路由不提供：
 
 ```text
 POST /platform/runs
 PATCH /platform/runs/{runId}
-POST/PATCH run_steps
+GET/POST/PATCH /platform/runs/{runId}/steps
 ```
 
-## 摘要
+## Snapshot 摘要
 
 ExecutionSnapshot 使用规范化 JSON 计算 SHA-256：
 
@@ -169,16 +185,18 @@ parse one JSON value
 
 相同语义、不同 key 顺序必须得到相同 digest。不同 Run 可以拥有 digest 相同但记录独立的 Snapshot。
 
-## 迁移顺序
+## 迁移结果
 
-1. 建立事实模型、状态机和单元测试。已完成。
-2. 将 Runtime 启动链统一到 GORM Store。已完成。
-3. Native ADK-Go 在模型调用前创建 Run、Snapshot 和 Attempt。已完成。
-4. ADK Event 映射并追加 RuntimeEvent。已完成。
-5. SSE 改为 Event Ledger 投影与重放。已完成第一版。
-6. 增加显式 PostgreSQL DDL migration，替代生产 AutoMigrate。
-7. 删除旧 pgx Run Store、`run_steps` 和 Controller 兼容代码。
-8. 退役或迁移非 Native 旧 `/run` 执行路径。
+1. 建立事实模型、状态机和单元测试。**完成**。
+2. Runtime 启动链统一到 GORM Store。**完成**。
+3. Native ADK-Go 在模型调用前创建 Run、Snapshot 和 Attempt。**完成**。
+4. ADK Event 先追加 RuntimeEvent，再投影 SSE。**完成**。
+5. SSE 使用 Event Ledger sequence 断点重放。**完成第一版**。
+6. PostgreSQL 使用显式版本化 DDL migration。**完成**。
+7. 旧 pgx Run Store 代码物理删除。**完成**。
+8. `run_steps` Model/Service/Controller/Route 删除，并通过 destructive migration 清表。**完成**。
+9. `platform_runs/platform_run_steps/platform_run_events` 通过 destructive migration 清理。**完成**。
+10. 非 Native Runner / Redis resumable 执行分支按 ADR-001 继续收口，不允许作为长期 fallback。
 
 ## 验收标准
 
@@ -191,3 +209,8 @@ parse one JSON value
 - Snapshot 中不存在 credential value。
 - 不支持的 schema version 必须失败关闭。
 - 浏览器不能创建或篡改 Runtime 执行事实。
+- 代码、API 和 schema 中不存在 `run_steps` 兼容链路。
+
+## 后续决策
+
+Tool Compiler、ApprovalGrant、Credential Broker、Context Builder 等后续执行能力必须建立在本 ADR 的 Run/Snapshot/Attempt/Event 事实模型之上，不得另外建立平行 Run 生命周期。
