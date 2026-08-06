@@ -15,6 +15,7 @@
 package runs
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -164,7 +165,19 @@ func (a *RunAttempt) BeforeCreate(tx *gorm.DB) error {
 	if a.RuntimeEngine == "" {
 		a.RuntimeEngine = "adk-go"
 	}
-	return nil
+	if a.TenantID == "" || a.RunID == "" {
+		return nil
+	}
+	var run Run
+	if err := tx.Select("status").Where("tenant_id = ? AND id = ?", a.TenantID, a.RunID).First(&run).Error; err != nil {
+		return err
+	}
+	switch run.Status {
+	case StatusPreparing, StatusFailed, StatusCancelled:
+		return nil
+	default:
+		return fmt.Errorf("run %s in status %s cannot start another attempt", a.RunID, run.Status)
+	}
 }
 
 // RuntimeEvent is an append-only fact. Sequence is strictly increasing per Run
