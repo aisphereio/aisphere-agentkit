@@ -27,14 +27,11 @@ func NewPlatformRunsAPIRouter(controller *controllers.PlatformRunsAPIController)
 func (r *PlatformRunsAPIRouter) Routes() Routes {
 	return Routes{
 		{Name: "ListPlatformRuns", Methods: []string{"GET"}, Pattern: "/platform/runs", HandlerFunc: r.controller.ListRunsHandler},
-		{Name: "CreatePlatformRun", Methods: []string{"POST"}, Pattern: "/platform/runs", HandlerFunc: r.controller.CreateRunHandler},
 		{Name: "GetPlatformRun", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}", HandlerFunc: r.controller.GetRunHandler},
-		{Name: "UpdatePlatformRun", Methods: []string{"PATCH"}, Pattern: "/platform/runs/{run_id}", HandlerFunc: r.controller.UpdateRunHandler},
 		{Name: "GetPlatformRunSnapshot", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/snapshot", HandlerFunc: r.controller.GetExecutionSnapshotHandler},
 		{Name: "ListPlatformRunAttempts", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/attempts", HandlerFunc: r.controller.ListAttemptsHandler},
 		{Name: "ListPlatformRunEvents", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/events", HandlerFunc: r.controller.ListEventsHandler},
+		{Name: "StreamPlatformRunEvents", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/events/stream", HandlerFunc: r.controller.StreamEventsHandler},
 		{Name: "ListPlatformRunSteps", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/steps", HandlerFunc: r.controller.ListStepsHandler},
-		{Name: "CreatePlatformRunStep", Methods: []string{"POST"}, Pattern: "/platform/runs/{run_id}/steps", HandlerFunc: r.controller.CreateStepHandler},
-		{Name: "UpdatePlatformRunStep", Methods: []string{"PATCH"}, Pattern: "/platform/run-steps/{step_id}", HandlerFunc: r.controller.UpdateStepHandler},
 	}
 }
