@@ -20,10 +20,12 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	runtimeFactsSchemaVersion int64 = 1
-	runtimeFactsMigrationLock int64 = 720260806001
-)
+const runtimeFactsMigrationLock int64 = 720260806001
+
+type runtimeFactsMigration struct {
+	version    int64
+	statements []string
+}
 
 func migratePostgresRuntimeFacts(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -38,30 +40,36 @@ CREATE TABLE IF NOT EXISTS runtime_schema_migrations (
 			return fmt.Errorf("lock runtime schema migration: %w", err)
 		}
 
-		var applied int64
-		if err := tx.Raw(
-			`SELECT COUNT(*) FROM runtime_schema_migrations WHERE version = ?`,
-			runtimeFactsSchemaVersion,
-		).Scan(&applied).Error; err != nil {
-			return fmt.Errorf("read runtime schema migration version: %w", err)
-		}
-		if applied > 0 {
-			return nil
-		}
-
-		for _, statement := range runtimeFactsPostgresV1Statements {
-			if err := tx.Exec(statement).Error; err != nil {
-				return fmt.Errorf("apply runtime facts schema v%d: %w", runtimeFactsSchemaVersion, err)
+		for _, migration := range runtimeFactsPostgresMigrations {
+			var applied int64
+			if err := tx.Raw(
+				`SELECT COUNT(*) FROM runtime_schema_migrations WHERE version = ?`,
+				migration.version,
+			).Scan(&applied).Error; err != nil {
+				return fmt.Errorf("read runtime schema migration version %d: %w", migration.version, err)
 			}
-		}
-		if err := tx.Exec(
-			`INSERT INTO runtime_schema_migrations(version) VALUES (?)`,
-			runtimeFactsSchemaVersion,
-		).Error; err != nil {
-			return fmt.Errorf("record runtime schema migration version: %w", err)
+			if applied > 0 {
+				continue
+			}
+			for _, statement := range migration.statements {
+				if err := tx.Exec(statement).Error; err != nil {
+					return fmt.Errorf("apply runtime facts schema v%d: %w", migration.version, err)
+				}
+			}
+			if err := tx.Exec(
+				`INSERT INTO runtime_schema_migrations(version) VALUES (?)`,
+				migration.version,
+			).Error; err != nil {
+				return fmt.Errorf("record runtime schema migration version %d: %w", migration.version, err)
+			}
 		}
 		return nil
 	})
+}
+
+var runtimeFactsPostgresMigrations = []runtimeFactsMigration{
+	{version: 1, statements: runtimeFactsPostgresV1Statements},
+	{version: 2, statements: runtimeFactsPostgresV2Statements},
 }
 
 var runtimeFactsPostgresV1Statements = []string{
@@ -162,21 +170,14 @@ var runtimeFactsPostgresV1Statements = []string{
 	`CREATE INDEX idx_runtime_events_attempt ON runtime_events(attempt_id, sequence)`,
 	`CREATE INDEX idx_runtime_events_type ON runtime_events(tenant_id, event_type, created_at DESC)`,
 	`CREATE INDEX idx_runtime_events_trace ON runtime_events(trace_id)`,
+}
 
-	// Temporary compatibility table. New execution code never writes it. It is
-	// created only so the read-only legacy route can survive one migration cycle.
-	`CREATE TABLE run_steps (
-    id VARCHAR(64) PRIMARY KEY,
-    tenant_id VARCHAR(128) NOT NULL,
-    run_id VARCHAR(64) NOT NULL,
-    kind VARCHAR(64) NOT NULL,
-    status VARCHAR(64) NOT NULL,
-    payload_json TEXT NOT NULL DEFAULT '',
-    error_message TEXT NOT NULL DEFAULT '',
-    started_at TIMESTAMPTZ NOT NULL,
-    finished_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)`,
-	`CREATE INDEX idx_run_steps_tenant_run ON run_steps(tenant_id, run_id, created_at)`,
+// V2 is deliberately destructive. AISphere has not shipped this execution
+// schema yet, so stale compatibility facts are removed instead of carried
+// forward as a second source of truth.
+var runtimeFactsPostgresV2Statements = []string{
+	`DROP TABLE IF EXISTS run_steps CASCADE`,
+	`DROP TABLE IF EXISTS platform_run_steps CASCADE`,
+	`DROP TABLE IF EXISTS platform_run_events CASCADE`,
+	`DROP TABLE IF EXISTS platform_runs CASCADE`,
 }
