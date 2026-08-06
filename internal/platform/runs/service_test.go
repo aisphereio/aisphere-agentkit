@@ -162,6 +162,53 @@ func TestRunExecutionFactLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunIdempotencyIsScopedByTenant(t *testing.T) {
+	svc := NewService(openRunTestDB(t))
+	ctx := context.Background()
+
+	first, err := svc.CreateRun(ctx, CreateRunRequest{TenantID: "tenant-a", IdempotencyKey: "same-request"})
+	if err != nil {
+		t.Fatalf("CreateRun tenant-a: %v", err)
+	}
+	second, err := svc.CreateRun(ctx, CreateRunRequest{TenantID: "tenant-b", IdempotencyKey: "same-request"})
+	if err != nil {
+		t.Fatalf("CreateRun tenant-b: %v", err)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("cross-tenant idempotency returned the same run %q", first.ID)
+	}
+}
+
+func TestIdenticalSnapshotDigestCanBeUsedByMultipleRuns(t *testing.T) {
+	svc := NewService(openRunTestDB(t))
+	ctx := context.Background()
+	const snapshotJSON = `{"agent":{"id":"agent-1","revision":"12"},"tools":[]}`
+
+	var snapshots []*ExecutionSnapshot
+	for _, runKey := range []string{"run-one", "run-two"} {
+		run, err := svc.CreateRun(ctx, CreateRunRequest{TenantID: "default", IdempotencyKey: runKey})
+		if err != nil {
+			t.Fatalf("CreateRun %s: %v", runKey, err)
+		}
+		snapshot, err := svc.CreateExecutionSnapshot(ctx, CreateExecutionSnapshotRequest{
+			TenantID:         "default",
+			RunID:            run.ID,
+			SourceSpecDigest: "sha256:source",
+			SnapshotJSON:     snapshotJSON,
+		})
+		if err != nil {
+			t.Fatalf("CreateExecutionSnapshot %s: %v", runKey, err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if snapshots[0].ID == snapshots[1].ID {
+		t.Fatalf("different runs shared snapshot row %q", snapshots[0].ID)
+	}
+	if snapshots[0].SnapshotDigest != snapshots[1].SnapshotDigest {
+		t.Fatalf("identical snapshots produced different digests: %q != %q", snapshots[0].SnapshotDigest, snapshots[1].SnapshotDigest)
+	}
+}
+
 func TestExecutionSnapshotCanonicalDigest(t *testing.T) {
 	first, err := CanonicalizeSnapshotJSON([]byte(`{"b":2,"a":{"y":2,"x":1}}`))
 	if err != nil {
