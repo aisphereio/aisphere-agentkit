@@ -209,6 +209,9 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 	if !sb.Enabled || (!sb.NativeSession && !strings.EqualFold(strings.TrimSpace(sb.Mode), "agent-native")) {
 		return nil, nil
 	}
+	if !sb.GoRunner {
+		return nil, fmt.Errorf("skills.aihub.sandbox.go_runner must be true: the sandbox session-worker Agent loop has been removed from the production runtime path")
+	}
 	endpoint := strings.TrimSpace(sb.AdapterEndpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("skills.aihub.sandbox.adapter_endpoint is required for native sandbox sessions")
@@ -243,7 +246,7 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 		SkillsRoot:     cfg.Skills.Root,
 		DefaultProfile: sb.DefaultProfile,
 		ReadyTimeout:   readyTimeout,
-		GoRunner:       sb.GoRunner,
+		GoRunner:       true,
 		RuntimeConfig:  cfg,
 	}, nil
 }
