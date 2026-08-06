@@ -98,10 +98,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			if err := projects.AutoMigrate(db); err != nil {
 				return nil, fmt.Errorf("failed to migrate platform projects: %w", err)
 			}
-			if !useNativePostgresRunStore(cfg.RuntimeConfig) {
-				if err := platformruns.AutoMigrate(db); err != nil {
-					return nil, fmt.Errorf("failed to migrate platform runs: %w", err)
-				}
+			if err := platformruns.AutoMigrate(db); err != nil {
+				return nil, fmt.Errorf("failed to migrate platform runs: %w", err)
 			}
 			if err := uploads.AutoMigrate(db); err != nil {
 				return nil, fmt.Errorf("failed to migrate platform uploads: %w", err)
@@ -123,15 +121,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			platformProjectService = projects.NewService(db)
 		}
 		if platformRunService == nil {
-			if useNativePostgresRunStore(cfg.RuntimeConfig) {
-				var err error
-				platformRunService, err = platformruns.NewPostgresService(context.Background(), resolvedPostgresDSN(cfg.RuntimeConfig), cfg.RuntimeConfig.Storage.Database.AutoMigrate)
-				if err != nil {
-					return nil, fmt.Errorf("failed to open postgres platform run store: %w", err)
-				}
-			} else {
-				platformRunService = platformruns.NewService(db)
-			}
+			platformRunService = platformruns.NewService(db)
 		}
 		if platformUploadService == nil {
 			platformUploadService = uploads.NewService(db, cfg.RuntimeConfig.Storage.Upload.Root)
@@ -175,7 +165,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		routers.NewPlatformApprovalsAPIRouter(controllers.NewPlatformApprovalsAPIController(platformApprovalService)),
 		routers.NewPlatformImprovementsAPIRouter(controllers.NewPlatformImprovementsAPIController(platformImprovementService)),
 		routers.NewSessionsAPIRouter(controllers.NewSessionsAPIController(cfg.SessionService, subAgentObserveStore, nativeSessionManager)),
-		routers.NewRuntimeAPIRouter(controllers.NewRuntimeAPIController(cfg.SessionService, cfg.MemoryService, cfg.AgentLoader, cfg.ArtifactService, cfg.SSEWriteTimeout, cfg.PluginConfig, false, cfg.RuntimeConfig, cfg.TraceRecorder, runStore, platformUploadService, subAgentObserveStore, nativeSessionManager)),
+		routers.NewRuntimeAPIRouter(controllers.NewRuntimeAPIController(cfg.SessionService, cfg.MemoryService, cfg.AgentLoader, cfg.ArtifactService, cfg.SSEWriteTimeout, cfg.PluginConfig, false, cfg.RuntimeConfig, cfg.TraceRecorder, runStore, platformRunService, platformUploadService, subAgentObserveStore, nativeSessionManager)),
 		routers.NewAppsAPIRouter(controllers.NewAppsAPIController(cfg.AgentLoader, cfg.BuilderAppsRoot, cfg.BuilderTmpRoot)),
 		routers.NewMetadataAPIRouter(controllers.NewMetadataAPIController(cfg.RuntimeConfig)),
 		routers.NewMCPAPIRouter(controllers.NewMCPAPIController(cfg.RuntimeConfig)),
@@ -348,25 +338,4 @@ func bootstrapConfiguredPrincipals(ctx context.Context, svc users.Service, cfg r
 func setupRouter(router *mux.Router, subrouters ...routers.Router) *mux.Router {
 	routers.SetupSubRouters(router, subrouters...)
 	return router
-}
-
-func useNativePostgresRunStore(cfg *runtimeconfig.Config) bool {
-	if cfg == nil {
-		return false
-	}
-	dbType := strings.ToLower(strings.TrimSpace(cfg.Storage.Database.Type))
-	return (dbType == "postgres" || dbType == "postgresql" || dbType == "pg") && resolvedPostgresDSN(cfg) != ""
-}
-
-func resolvedPostgresDSN(cfg *runtimeconfig.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	if strings.TrimSpace(cfg.Storage.Database.DSN) != "" {
-		return strings.TrimSpace(cfg.Storage.Database.DSN)
-	}
-	if strings.TrimSpace(cfg.Storage.Database.DSNEnv) != "" {
-		return strings.TrimSpace(os.Getenv(cfg.Storage.Database.DSNEnv))
-	}
-	return ""
 }
