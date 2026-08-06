@@ -25,8 +25,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Service owns Runtime execution facts. ExecutionSnapshot and RuntimeEvent are
-// append-only; Run and RunAttempt may only move through validated states.
+// Service is the Runtime execution-fact store. It intentionally exposes only
+// the current Run/Snapshot/Attempt/Event model. Legacy run_steps APIs are not
+// part of the contract.
 type Service interface {
 	CreateRun(ctx context.Context, req CreateRunRequest) (*Run, error)
 	GetRun(ctx context.Context, tenantID, id string) (*Run, error)
@@ -43,12 +44,6 @@ type Service interface {
 
 	AppendEvent(ctx context.Context, req AppendEventRequest) (*RuntimeEvent, error)
 	ListEvents(ctx context.Context, tenantID, runID string, after uint64, limit int) ([]RuntimeEvent, error)
-
-	// Step methods are retained for the temporary platform API. New Runtime code
-	// must use RuntimeEvent instead.
-	CreateStep(ctx context.Context, req CreateStepRequest) (*Step, error)
-	ListSteps(ctx context.Context, tenantID, runID string) ([]Step, error)
-	UpdateStep(ctx context.Context, tenantID, id string, req UpdateStepRequest) (*Step, error)
 }
 
 type CreateRunRequest struct {
@@ -121,27 +116,13 @@ type UpdateAttemptRequest struct {
 }
 
 type AppendEventRequest struct {
-	TenantID    string
-	RunID       string
-	AttemptID   string
-	EventType   string
+	TenantID     string
+	RunID        string
+	AttemptID    string
+	EventType    string
 	EventVersion string
-	PayloadJSON string
-	TraceID     string
-}
-
-type CreateStepRequest struct {
-	TenantID    string
-	RunID       string
-	Kind        string
-	Status      string
-	PayloadJSON string
-}
-
-type UpdateStepRequest struct {
-	Status       string
-	ErrorMessage string
-	PayloadJSON  *string
+	PayloadJSON  string
+	TraceID      string
 }
 
 type gormService struct {
@@ -493,14 +474,14 @@ func (s *gormService) AppendEvent(ctx context.Context, req AppendEventRequest) (
 			return err
 		}
 		created := &RuntimeEvent{
-			TenantID:    strings.TrimSpace(req.TenantID),
-			RunID:       strings.TrimSpace(req.RunID),
-			AttemptID:   strings.TrimSpace(req.AttemptID),
-			Sequence:    latest + 1,
-			EventType:   strings.TrimSpace(req.EventType),
+			TenantID:     strings.TrimSpace(req.TenantID),
+			RunID:        strings.TrimSpace(req.RunID),
+			AttemptID:    strings.TrimSpace(req.AttemptID),
+			Sequence:     latest + 1,
+			EventType:    strings.TrimSpace(req.EventType),
 			EventVersion: firstNonEmpty(req.EventVersion, RuntimeEventVersionV1),
-			PayloadJSON: req.PayloadJSON,
-			TraceID:     strings.TrimSpace(req.TraceID),
+			PayloadJSON:  req.PayloadJSON,
+			TraceID:      strings.TrimSpace(req.TraceID),
 		}
 		if err := tx.Create(created).Error; err != nil {
 			return err
@@ -525,59 +506,6 @@ func (s *gormService) ListEvents(ctx context.Context, tenantID, runID string, af
 		Limit(limit).
 		Find(&out).Error
 	return out, err
-}
-
-func (s *gormService) CreateStep(ctx context.Context, req CreateStepRequest) (*Step, error) {
-	if strings.TrimSpace(req.TenantID) == "" {
-		return nil, fmt.Errorf("tenant_id is required")
-	}
-	if strings.TrimSpace(req.RunID) == "" {
-		return nil, fmt.Errorf("run_id is required")
-	}
-	step := &Step{
-		TenantID:    req.TenantID,
-		RunID:       req.RunID,
-		Kind:        firstNonEmpty(req.Kind, "unknown"),
-		Status:      firstNonEmpty(req.Status, StatusRunning),
-		PayloadJSON: req.PayloadJSON,
-	}
-	if err := s.db.WithContext(ctx).Create(step).Error; err != nil {
-		return nil, err
-	}
-	return step, nil
-}
-
-func (s *gormService) ListSteps(ctx context.Context, tenantID, runID string) ([]Step, error) {
-	var out []Step
-	err := s.db.WithContext(ctx).Where("tenant_id = ? AND run_id = ?", tenantID, runID).Order("created_at ASC").Find(&out).Error
-	return out, err
-}
-
-func (s *gormService) UpdateStep(ctx context.Context, tenantID, id string, req UpdateStepRequest) (*Step, error) {
-	var step Step
-	err := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&step).Error
-	if err != nil {
-		return nil, err
-	}
-	if req.Status != "" {
-		step.Status = req.Status
-		if isTerminalRunStatus(req.Status) {
-			now := time.Now().UTC()
-			step.FinishedAt = &now
-		} else if req.Status == StatusRunning || req.Status == StatusWaitingApproval {
-			step.FinishedAt = nil
-		}
-	}
-	if req.ErrorMessage != "" {
-		step.ErrorMessage = req.ErrorMessage
-	}
-	if req.PayloadJSON != nil {
-		step.PayloadJSON = *req.PayloadJSON
-	}
-	if err := s.db.WithContext(ctx).Save(&step).Error; err != nil {
-		return nil, err
-	}
-	return &step, nil
 }
 
 func (s *gormService) updateRun(ctx context.Context, tenantID, id string, fn func(*Run) error) (*Run, error) {
