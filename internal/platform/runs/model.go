@@ -87,6 +87,9 @@ func (r *Run) BeforeCreate(tx *gorm.DB) error {
 	if r.Status == "" {
 		r.Status = StatusPreparing
 	}
+	if r.StartedAt.IsZero() {
+		r.StartedAt = time.Now().UTC()
+	}
 	return nil
 }
 
@@ -245,9 +248,12 @@ func (s *Step) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
-// AutoMigrate creates the Runtime fact tables and the temporary legacy step
-// table. Production migrations will replace AutoMigrate before launch.
+// AutoMigrate uses versioned explicit DDL in PostgreSQL. GORM AutoMigrate is
+// retained only for SQLite-backed tests and local ephemeral development stores.
 func AutoMigrate(db *gorm.DB) error {
+	if db.Dialector.Name() == "postgres" {
+		return migratePostgresRuntimeFacts(db)
+	}
 	return db.AutoMigrate(
 		&Run{},
 		&ExecutionSnapshot{},
