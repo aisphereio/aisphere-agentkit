@@ -27,7 +27,8 @@ import (
 	platformruns "google.golang.org/adk/internal/platform/runs"
 )
 
-// PlatformRunsAPIController exposes platform run lifecycle records.
+// PlatformRunsAPIController exposes Runtime execution facts. Snapshot, Attempt,
+// and Event endpoints are intentionally read-only; only Runtime may create them.
 type PlatformRunsAPIController struct {
 	service platformruns.Service
 }
@@ -46,6 +47,8 @@ func (c *PlatformRunsAPIController) ListRunsHandler(rw http.ResponseWriter, req 
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	runs, err := c.service.ListRuns(req.Context(), platformruns.ListRunsFilter{
 		TenantID:  p.TenantID,
+		ProjectID: q.Get("project_id"),
+		AgentID:   q.Get("agent_id"),
 		AppName:   q.Get("app_name"),
 		UserID:    q.Get("user_id"),
 		SessionID: q.Get("session_id"),
@@ -66,13 +69,20 @@ func (c *PlatformRunsAPIController) CreateRunHandler(rw http.ResponseWriter, req
 	}
 	p := auth.FromContext(req.Context())
 	var body struct {
-		AppName      string `json:"app_name"`
-		UserID       string `json:"user_id"`
-		SessionID    string `json:"session_id"`
-		Status       string `json:"status"`
-		InputSummary string `json:"input_summary"`
-		ModelRef     string `json:"model_ref"`
-		MetadataJSON string `json:"metadata_json"`
+		ProjectID      string `json:"project_id"`
+		ConversationID string `json:"conversation_id"`
+		AppName        string `json:"app_name"`
+		AgentID        string `json:"agent_id"`
+		AgentRevision  string `json:"agent_revision"`
+		UserID         string `json:"user_id"`
+		SessionID      string `json:"session_id"`
+		Status         string `json:"status"`
+		TriggerType    string `json:"trigger_type"`
+		IdempotencyKey string `json:"idempotency_key"`
+		InputSummary   string `json:"input_summary"`
+		ModelRef       string `json:"model_ref"`
+		TraceID        string `json:"trace_id"`
+		MetadataJSON   string `json:"metadata_json"`
 	}
 	if req.Body != nil {
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -85,14 +95,22 @@ func (c *PlatformRunsAPIController) CreateRunHandler(rw http.ResponseWriter, req
 		userID = p.UserID
 	}
 	run, err := c.service.CreateRun(req.Context(), platformruns.CreateRunRequest{
-		TenantID:     p.TenantID,
-		AppName:      body.AppName,
-		UserID:       userID,
-		SessionID:    body.SessionID,
-		Status:       body.Status,
-		InputSummary: body.InputSummary,
-		ModelRef:     body.ModelRef,
-		MetadataJSON: body.MetadataJSON,
+		TenantID:       p.TenantID,
+		ProjectID:      body.ProjectID,
+		ConversationID: body.ConversationID,
+		AppName:        body.AppName,
+		AgentID:        body.AgentID,
+		AgentRevision:  body.AgentRevision,
+		UserID:         userID,
+		PrincipalID:    p.UserID,
+		SessionID:      body.SessionID,
+		Status:         body.Status,
+		TriggerType:    body.TriggerType,
+		IdempotencyKey: body.IdempotencyKey,
+		InputSummary:   body.InputSummary,
+		ModelRef:       body.ModelRef,
+		TraceID:        body.TraceID,
+		MetadataJSON:   body.MetadataJSON,
 	})
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
@@ -125,6 +143,7 @@ func (c *PlatformRunsAPIController) UpdateRunHandler(rw http.ResponseWriter, req
 	id := mux.Vars(req)["run_id"]
 	var body struct {
 		Status       string  `json:"status"`
+		FailureCode  string  `json:"failure_code"`
 		ErrorMessage string  `json:"error_message"`
 		MetadataJSON *string `json:"metadata_json"`
 	}
@@ -134,6 +153,7 @@ func (c *PlatformRunsAPIController) UpdateRunHandler(rw http.ResponseWriter, req
 	}
 	run, err := c.service.UpdateRun(req.Context(), p.TenantID, id, platformruns.UpdateRunRequest{
 		Status:       body.Status,
+		FailureCode:  body.FailureCode,
 		ErrorMessage: body.ErrorMessage,
 		MetadataJSON: body.MetadataJSON,
 	})
@@ -142,6 +162,62 @@ func (c *PlatformRunsAPIController) UpdateRunHandler(rw http.ResponseWriter, req
 		return
 	}
 	EncodeJSONResponse(run, http.StatusOK, rw)
+}
+
+func (c *PlatformRunsAPIController) GetExecutionSnapshotHandler(rw http.ResponseWriter, req *http.Request) {
+	if c.service == nil {
+		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
+		return
+	}
+	p := auth.FromContext(req.Context())
+	runID := mux.Vars(req)["run_id"]
+	run, err := c.service.GetRun(req.Context(), p.TenantID, runID)
+	if err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	if run.SnapshotID == "" {
+		http.Error(rw, "execution snapshot not created", http.StatusNotFound)
+		return
+	}
+	snapshot, err := c.service.GetExecutionSnapshot(req.Context(), p.TenantID, run.SnapshotID)
+	if err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	EncodeJSONResponse(snapshot, http.StatusOK, rw)
+}
+
+func (c *PlatformRunsAPIController) ListAttemptsHandler(rw http.ResponseWriter, req *http.Request) {
+	if c.service == nil {
+		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
+		return
+	}
+	p := auth.FromContext(req.Context())
+	runID := mux.Vars(req)["run_id"]
+	attempts, err := c.service.ListAttempts(req.Context(), p.TenantID, runID)
+	if err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	EncodeJSONResponse(attempts, http.StatusOK, rw)
+}
+
+func (c *PlatformRunsAPIController) ListEventsHandler(rw http.ResponseWriter, req *http.Request) {
+	if c.service == nil {
+		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
+		return
+	}
+	p := auth.FromContext(req.Context())
+	runID := mux.Vars(req)["run_id"]
+	after, _ := strconv.ParseUint(req.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	events, err := c.service.ListEvents(req.Context(), p.TenantID, runID, after, limit)
+	if err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	EncodeJSONResponse(events, http.StatusOK, rw)
 }
 
 func (c *PlatformRunsAPIController) ListStepsHandler(rw http.ResponseWriter, req *http.Request) {
@@ -220,6 +296,10 @@ func (c *PlatformRunsAPIController) UpdateStepHandler(rw http.ResponseWriter, re
 func writePlatformError(rw http.ResponseWriter, err error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		http.Error(rw, err.Error(), http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, platformruns.ErrLegacyPostgresExecutionFacts) {
+		http.Error(rw, err.Error(), http.StatusNotImplemented)
 		return
 	}
 	http.Error(rw, err.Error(), http.StatusInternalServerError)
