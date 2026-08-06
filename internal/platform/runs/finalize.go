@@ -17,6 +17,7 @@ package runs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,13 +32,13 @@ type ExecutionFinalizer interface {
 }
 
 type FinalizeExecutionRequest struct {
-	TenantID    string
-	RunID       string
-	AttemptID   string
-	Status      string
-	FailureCode string
+	TenantID     string
+	RunID        string
+	AttemptID    string
+	Status       string
+	FailureCode  string
 	ErrorMessage string
-	TraceID     string
+	TraceID      string
 }
 
 func (s *gormService) FinalizeExecution(ctx context.Context, req FinalizeExecutionRequest) (*RuntimeEvent, error) {
@@ -70,13 +71,18 @@ func (s *gormService) FinalizeExecution(ctx context.Context, req FinalizeExecuti
 
 		if run.Status == runStatus && attempt.Status == attemptStatus {
 			var existing RuntimeEvent
-			err := tx.Where("tenant_id = ? AND run_id = ? AND attempt_id = ? AND event_type = ?", tenantID, runID, attemptID, runEventType).
-				Order("sequence DESC").First(&existing).Error
+			err := tx.Where(
+				"tenant_id = ? AND run_id = ? AND attempt_id = ? AND event_type = ?",
+				tenantID,
+				runID,
+				attemptID,
+				runEventType,
+			).Order("sequence DESC").First(&existing).Error
 			if err == nil {
 				terminalEvent = &existing
 				return nil
 			}
-			if err != nil && err != gorm.ErrRecordNotFound {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
 		}
@@ -116,49 +122,49 @@ func (s *gormService) FinalizeExecution(ctx context.Context, req FinalizeExecuti
 		}
 
 		attemptPayload, err := json.Marshal(map[string]any{
-			"attemptId": attemptID,
-			"status": attemptStatus,
+			"attemptId":  attemptID,
+			"status":     attemptStatus,
 			"failureCode": strings.TrimSpace(req.FailureCode),
-			"message": req.ErrorMessage,
+			"message":    req.ErrorMessage,
 		})
 		if err != nil {
 			return err
 		}
 		attemptEvent := &RuntimeEvent{
-			TenantID: tenantID,
-			RunID: runID,
-			AttemptID: attemptID,
-			Sequence: latest + 1,
-			EventType: attemptEventType,
+			TenantID:     tenantID,
+			RunID:        runID,
+			AttemptID:    attemptID,
+			Sequence:     latest + 1,
+			EventType:    attemptEventType,
 			EventVersion: RuntimeEventVersionV1,
-			PayloadJSON: string(attemptPayload),
-			TraceID: strings.TrimSpace(req.TraceID),
-			CreatedAt: now,
+			PayloadJSON:  string(attemptPayload),
+			TraceID:      strings.TrimSpace(req.TraceID),
+			CreatedAt:    now,
 		}
 		if err := tx.Create(attemptEvent).Error; err != nil {
 			return err
 		}
 
 		runPayload, err := json.Marshal(map[string]any{
-			"runId": runID,
-			"attemptId": attemptID,
-			"status": runStatus,
+			"runId":       runID,
+			"attemptId":   attemptID,
+			"status":      runStatus,
 			"failureCode": strings.TrimSpace(req.FailureCode),
-			"message": req.ErrorMessage,
+			"message":     req.ErrorMessage,
 		})
 		if err != nil {
 			return err
 		}
 		runEvent := &RuntimeEvent{
-			TenantID: tenantID,
-			RunID: runID,
-			AttemptID: attemptID,
-			Sequence: latest + 2,
-			EventType: runEventType,
+			TenantID:     tenantID,
+			RunID:        runID,
+			AttemptID:    attemptID,
+			Sequence:     latest + 2,
+			EventType:    runEventType,
 			EventVersion: RuntimeEventVersionV1,
-			PayloadJSON: string(runPayload),
-			TraceID: strings.TrimSpace(req.TraceID),
-			CreatedAt: now,
+			PayloadJSON:  string(runPayload),
+			TraceID:      strings.TrimSpace(req.TraceID),
+			CreatedAt:    now,
 		}
 		if err := tx.Create(runEvent).Error; err != nil {
 			return err
@@ -174,11 +180,11 @@ func (s *gormService) FinalizeExecution(ctx context.Context, req FinalizeExecuti
 
 func terminalStatusMapping(status string) (attemptStatus, runStatus, attemptEventType, runEventType string, err error) {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case StatusSucceeded, StatusCompleted, AttemptStatusSucceeded:
+	case StatusSucceeded, StatusCompleted:
 		return AttemptStatusSucceeded, StatusSucceeded, "attempt.completed", "run.completed", nil
-	case StatusFailed, AttemptStatusFailed:
+	case StatusFailed:
 		return AttemptStatusFailed, StatusFailed, "attempt.failed", "run.failed", nil
-	case StatusCancelled, AttemptStatusCancelled:
+	case StatusCancelled:
 		return AttemptStatusCancelled, StatusCancelled, "attempt.cancelled", "run.cancelled", nil
 	default:
 		return "", "", "", "", fmt.Errorf("unsupported terminal execution status %q", status)
