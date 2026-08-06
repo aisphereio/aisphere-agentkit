@@ -22,18 +22,26 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 )
 
-var forbiddenSnapshotKeys = map[string]struct{}{
-	"access_token":     {},
-	"api_key":          {},
-	"apikey":           {},
-	"client_secret":    {},
-	"credential_value": {},
-	"password":         {},
-	"refresh_token":    {},
-	"secret":           {},
-	"token":            {},
+// Keys are normalized to lower-case alpha-numeric form so snake_case,
+// kebab-case, and camelCase names are evaluated consistently.
+var forbiddenSnapshotCredentialKeys = map[string]struct{}{
+	"accesstoken":     {},
+	"apikey":          {},
+	"authorization":   {},
+	"bearer":          {},
+	"clientsecret":    {},
+	"cookie":          {},
+	"credentialvalue": {},
+	"password":        {},
+	"privatekey":      {},
+	"refreshtoken":    {},
+	"secret":          {},
+	"setcookie":       {},
+	"sshprivatekey":   {},
+	"token":           {},
 }
 
 // CanonicalizeSnapshotJSON parses one JSON value, rejects credential values,
@@ -82,8 +90,8 @@ func validateSnapshotValue(value any, path string) error {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			normalized := strings.ToLower(strings.TrimSpace(key))
-			if _, forbidden := forbiddenSnapshotKeys[normalized]; forbidden {
+			normalized := normalizeSnapshotKey(key)
+			if _, forbidden := forbiddenSnapshotCredentialKeys[normalized]; forbidden && containsCredentialValue(child) {
 				return fmt.Errorf("execution snapshot contains forbidden credential field %s.%s", path, key)
 			}
 			if err := validateSnapshotValue(child, path+"."+key); err != nil {
@@ -98,4 +106,39 @@ func validateSnapshotValue(value any, path string) error {
 		}
 	}
 	return nil
+}
+
+func normalizeSnapshotKey(key string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, strings.TrimSpace(key))
+}
+
+func containsCredentialValue(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case map[string]any:
+		// A Tool input/output schema may legitimately define a property named
+		// token or password. Schema metadata is a contract, not a credential.
+		return !looksLikeJSONSchemaNode(typed) && len(typed) > 0
+	case []any:
+		return len(typed) > 0
+	default:
+		return true
+	}
+}
+
+func looksLikeJSONSchemaNode(value map[string]any) bool {
+	for _, key := range []string{"type", "$ref", "properties", "items", "oneOf", "anyOf", "allOf", "enum", "const"} {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
 }
