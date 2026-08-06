@@ -5,6 +5,7 @@
 ## 当前有效决策
 
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md)
+- [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md)（Proposed）
 
 ## 解释优先级
 
