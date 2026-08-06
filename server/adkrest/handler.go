@@ -150,6 +150,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create native sandbox session manager: %w", err)
 	}
+	runtimeController := controllers.NewRuntimeAPIController(
+		cfg.SessionService,
+		cfg.MemoryService,
+		cfg.AgentLoader,
+		cfg.ArtifactService,
+		cfg.SSEWriteTimeout,
+		cfg.PluginConfig,
+		false,
+		cfg.RuntimeConfig,
+		cfg.TraceRecorder,
+		runStore,
+		platformUploadService,
+		subAgentObserveStore,
+		nativeSessionManager,
+	)
+	runtimeController.SetExecutionFactService(platformRunService)
 
 	router := mux.NewRouter().StrictSlash(true)
 	// TODO: Allow taking a prefix to allow customizing the path
@@ -165,7 +181,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		routers.NewPlatformApprovalsAPIRouter(controllers.NewPlatformApprovalsAPIController(platformApprovalService)),
 		routers.NewPlatformImprovementsAPIRouter(controllers.NewPlatformImprovementsAPIController(platformImprovementService)),
 		routers.NewSessionsAPIRouter(controllers.NewSessionsAPIController(cfg.SessionService, subAgentObserveStore, nativeSessionManager)),
-		routers.NewRuntimeAPIRouter(controllers.NewRuntimeAPIController(cfg.SessionService, cfg.MemoryService, cfg.AgentLoader, cfg.ArtifactService, cfg.SSEWriteTimeout, cfg.PluginConfig, false, cfg.RuntimeConfig, cfg.TraceRecorder, runStore, platformRunService, platformUploadService, subAgentObserveStore, nativeSessionManager)),
+		routers.NewRuntimeAPIRouter(runtimeController),
 		routers.NewAppsAPIRouter(controllers.NewAppsAPIController(cfg.AgentLoader, cfg.BuilderAppsRoot, cfg.BuilderTmpRoot)),
 		routers.NewMetadataAPIRouter(controllers.NewMetadataAPIController(cfg.RuntimeConfig)),
 		routers.NewMCPAPIRouter(controllers.NewMCPAPIController(cfg.RuntimeConfig)),
