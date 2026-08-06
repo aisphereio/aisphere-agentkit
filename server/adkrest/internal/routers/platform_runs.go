@@ -32,6 +32,5 @@ func (r *PlatformRunsAPIRouter) Routes() Routes {
 		{Name: "ListPlatformRunAttempts", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/attempts", HandlerFunc: r.controller.ListAttemptsHandler},
 		{Name: "ListPlatformRunEvents", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/events", HandlerFunc: r.controller.ListEventsHandler},
 		{Name: "StreamPlatformRunEvents", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/events/stream", HandlerFunc: r.controller.StreamEventsHandler},
-		{Name: "ListPlatformRunSteps", Methods: []string{"GET"}, Pattern: "/platform/runs/{run_id}/steps", HandlerFunc: r.controller.ListStepsHandler},
 	}
 }
