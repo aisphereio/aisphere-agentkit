@@ -168,7 +168,6 @@ func (r *Registry) Resolve(ctx context.Context, id, implementationVersion string
 	}
 
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	selected, ok := r.entries[registryKey(id, implementationVersion)]
 	if implementationVersion == "" {
 		matches := make([]entry, 0, 1)
@@ -179,16 +178,22 @@ func (r *Registry) Resolve(ctx context.Context, id, implementationVersion string
 		}
 		switch len(matches) {
 		case 0:
+			r.mu.RUnlock()
 			return nil, Descriptor{}, fmt.Errorf("builtin implementation %q is not available", id)
 		case 1:
 			selected, ok = matches[0], true
 		default:
+			r.mu.RUnlock()
 			return nil, Descriptor{}, fmt.Errorf("builtin %q has multiple implementation versions; an exact version is required", id)
 		}
 	}
 	if !ok {
+		r.mu.RUnlock()
 		return nil, Descriptor{}, fmt.Errorf("builtin implementation %s is not available", registryKey(id, implementationVersion))
 	}
+	selected = entry{descriptor: cloneDescriptor(selected.descriptor), factory: selected.factory}
+	r.mu.RUnlock()
+
 	resolved, err := selected.factory(ctx, cloneMap(args))
 	if err != nil {
 		return nil, Descriptor{}, err
@@ -196,7 +201,7 @@ func (r *Registry) Resolve(ctx context.Context, id, implementationVersion string
 	if resolved == nil {
 		return nil, Descriptor{}, fmt.Errorf("builtin implementation %s returned nil tool", registryKey(selected.descriptor.ID, selected.descriptor.ImplementationVersion))
 	}
-	return resolved, cloneDescriptor(selected.descriptor), nil
+	return resolved, selected.descriptor, nil
 }
 
 // Manifest returns a deterministic descriptor-only view suitable for Hub
