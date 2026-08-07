@@ -2,6 +2,7 @@
 
 - Status: Active migration ledger
 - Date: 2026-08-07
+- Implementation checkpoint: Builtin V1 batch 1 registered; conflicting PlanRun/local retrieval entries retired
 - Scope: `internal/configurable`, `tool/*`, Runtime Tool V1
 
 本文不是新的 Tool 领域模型；领域决策以 ADR-003/ADR-004 为准。本文只回答当前 AgentKit 已注册能力 **现在是什么、目标应该放在哪里、何时删除旧入口**。
