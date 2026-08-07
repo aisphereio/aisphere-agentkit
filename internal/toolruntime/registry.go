@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // Package toolruntime maps Hub tool bindings to executable ADK tool adapters.
-// It is the single seam where sandbox tools, MCP tools, and Runtime-owned
-// builtin tools become visible to the ADK-Go agent.
+// It is the single seam where Runtime builtins, AISphere service operations,
+// sandbox capabilities, MCP tools, and HTTP tools become visible to ADK-Go.
 package toolruntime
 
 import (
@@ -28,6 +28,7 @@ import (
 
 const (
 	ConnectorBuiltin = "builtin"
+	ConnectorService = "service"
 	ConnectorSandbox = "sandbox"
 	ConnectorMCP     = "mcp"
 	ConnectorHTTP    = "http"
@@ -184,7 +185,11 @@ func normalizeConnectorKind(value string) string {
 	case "":
 		return value
 	case "internal", "go", "function", ConnectorBuiltin:
+		// Legacy `internal` meant an in-process Go/function implementation. Do
+		// not reinterpret it as ConnectorService during migration.
 		return ConnectorBuiltin
+	case "internal-service", "internal_service", "platform-service", "platform_service", ConnectorService:
+		return ConnectorService
 	case "sandbox-tool", "sandbox_tools", ConnectorSandbox:
 		return ConnectorSandbox
 	case "mcp-toolset", "mcp_server", ConnectorMCP:
