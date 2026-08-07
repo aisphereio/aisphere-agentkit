@@ -6,6 +6,7 @@
 
 - [SYSTEM-BOUNDARIES.md](SYSTEM-BOUNDARIES.md) — AISphere 跨组件职责边界、对象 Owner 与协作契约。
 - [MODULE-CATALOG.md](MODULE-CATALOG.md) — Hub / Runtime / Sandbox / IAM / Model Gateway 的模块功能清单、接口和架构债务台账。
+- [STORAGE-RETRIEVAL-RESERVATION.md](STORAGE-RETRIEVAL-RESERVATION.md) — Conversation / File / Memory / Retrieval 的逻辑位置与未来 OceanBase adapter 预留；当前不实现临时存储后端。
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md) — Runtime 只保留一套 ADK-Go Agent Loop。
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
 
@@ -37,6 +38,7 @@ AgentKit
     ├── Tool Compiler / Broker
     ├── Model Runtime
     ├── Approval / Credential coordination
+    ├── Conversation / File / Memory / Retrieval ports (reserved)
     └── RuntimeEvent Ledger
 ```
 
@@ -71,6 +73,16 @@ GET /platform/runs/{run_id}/events
 GET /platform/runs/{run_id}/events/stream
 ```
 
+Conversation / File / Memory 与 Run facts 分离：
+
+```text
+Conversation / Message / Memory / Knowledge
+  = 可持续 Context 与用户/项目知识
+
+Run / Snapshot / Attempt / RuntimeEvent
+  = 一次执行的事实与审计时间线
+```
+
 已废弃并从目标架构删除：
 
 ```text
@@ -98,10 +110,12 @@ Redis resumable buffer 作为历史事实源
 2. Tool Compiler + Unified Invocation Pipeline
 3. server-side ApprovalGrant + Credential Broker
 4. Hub immutable revision/version pinning
-5. Sandbox Tool Server contract
+5. Sandbox Tool Server / Lease contract
 6. MCP discovery/schema drift
 7. Model Gateway integration
-8. Context / Memory pipeline
+8. Context Builder skeleton + Conversation/File/Memory/Retrieval ports
+9. OceanBase adapter / indexing / hybrid retrieval
+10. Conversation / Knowledge / Memory product APIs
 ```
 
-每一步都必须满足 `SYSTEM-BOUNDARIES.md` 中的架构不变量，并同步维护 `MODULE-CATALOG.md` 的债务状态。
+第 8 步以前不为 Conversation、File/Knowledge 或 Memory 建设临时 PostgreSQL/MinIO/Vector Store 数据面。每一步都必须满足 `SYSTEM-BOUNDARIES.md` 中的架构不变量，并同步维护 `MODULE-CATALOG.md` 的债务状态。
