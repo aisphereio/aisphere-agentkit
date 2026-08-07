@@ -12,6 +12,7 @@
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
 - [ADR-003: Tool Contract 与统一 Invocation Pipeline V1](ADR-003-tool-contract-v1.md) — Tool V1 总体分层与统一执行链，目前为 Proposed，继续随代码校准。
 - [ADR-004: Builtin Tool V1](ADR-004-builtin-tools-v1.md) — Runtime code-first Builtin、Hub catalog mirror、Agent 显式选择及 V1 无独立 Builtin AuthZ 规则。
+- [ADR-005: Tool Connector Taxonomy V1](ADR-005-tool-connector-taxonomy-v1.md) — Accepted；Tool 语义 / source-discovery / execution connector 三轴分离，canonical connector 为 `builtin/service/sandbox/mcp/http`。
 
 ## 解释优先级
 
@@ -110,11 +111,11 @@ Redis resumable buffer 作为历史事实源
 
 ```text
 1. Runtime legacy 执行链收口
-2. BuiltinRegistry + Tool Compiler + Unified Invocation Pipeline
+2. Tool taxonomy + BuiltinRegistry + ToolCompiler + Unified Invocation Pipeline
 3. server-side ApprovalGrant + Credential Broker
 4. Hub immutable revision/version pinning
 5. Sandbox Tool Server / Lease contract
-6. MCP discovery/schema drift
+6. Service/MCP/HTTP adapter + discovery/schema drift
 7. Model Gateway integration
 8. Context Builder skeleton + Conversation/File/Memory/Retrieval ports
 9. OceanBase adapter / indexing / hybrid retrieval
