@@ -52,3 +52,18 @@ func TestResolverPinnedV1DoesNotFallBackToLegacyFactory(t *testing.T) {
 		t.Fatalf("ResolveTool() error = %v, want pinned implementation unavailable", err)
 	}
 }
+
+func TestResolverUsesDefaultRegistryForMigratedPinnedBuiltin(t *testing.T) {
+	resolved, err := (Resolver{}).ResolveTool(runtimeplan.ToolBinding{
+		Name:        "load_memory",
+		RuntimeName: "load_memory",
+		RuntimeType: "builtin",
+		Metadata:    map[string]interface{}{"implementationVersion": builtinImplementationVersion},
+	})
+	if err != nil {
+		t.Fatalf("ResolveTool() error = %v", err)
+	}
+	if resolved == nil || resolved.Name() != "load_memory" {
+		t.Fatalf("unexpected migrated builtin tool: %#v", resolved)
+	}
+}
