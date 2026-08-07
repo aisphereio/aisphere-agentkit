@@ -55,9 +55,9 @@ Retire
 | `SessionWorkspaceToolset` | local Runtime filesystem Toolset | Sandbox Capability | Remove Runtime-local filesystem execution; use Sandbox workspace executor |
 | `EnvToolset` | environment/shell Toolset | Environment service / Sandbox Adapter | Must not execute free-form shell in trusted Runtime; remove current direct path |
 | `SkillAuthoringToolset` | Runtime-local filesystem Skill CRUD | Hub-backed Tool/Adapter | Hub owns Skill definitions; remove local filesystem authoring path |
-| `files_retrieval` | local keyword retrieval | Retire -> Retrieval port/OceanBase | **REMOVE**; temporary local retrieval conflicts with storage/retrieval reservation |
-| `FilesRetrieval` | alias | Retire | Remove alias together with `files_retrieval` |
-| `PlanRunToolset` | artifact-backed second Run/loop state | Retire | **REMOVE**; conflicts with canonical Run/Snapshot/Attempt/Event facts |
+| `files_retrieval` | local keyword retrieval | Retire -> Retrieval port/OceanBase | **RETIRED FROM GLOBAL REGISTRY**; replace with Retrieval port + OceanBase adapter |
+| `FilesRetrieval` | alias | Retire | **RETIRED FROM GLOBAL REGISTRY** |
+| `PlanRunToolset` | artifact-backed second Run/loop state | Retire | **RETIRED FROM GLOBAL REGISTRY**; canonical Runtime facts replace it |
 | `ProjectArtifactToolset` | project/domain artifact Toolset | Domain/Product + future storage port | Remove from generic Runtime registry; redesign after File/Artifact/OceanBase contract |
 | `UploadToolset` | platform upload Toolset | Domain/Product + File service | Remove from generic Runtime registry; Runtime should consume file refs/ports |
 | `NovelStoreToolset` | novel-specific PG/ObjectStore tools | Domain/Product | Extract from AgentKit core; do not migrate into Tool V1 Builtin |
@@ -103,8 +103,8 @@ Their descriptor schema is derived from the code-owned ADK `FunctionDeclaration`
 
 ### P0
 
-1. Remove `PlanRunToolset` from the global configurable Tool registry; use canonical Runtime Run facts.
-2. Remove `files_retrieval` / `FilesRetrieval` from the global configurable Tool registry; wait for Retrieval port + OceanBase adapter.
+1. `PlanRunToolset` removed from global configurable resolution. Canonical Runtime Run facts are the only run lifecycle.
+2. `files_retrieval` / `FilesRetrieval` removed from global configurable resolution. Retrieval waits for Retrieval port + OceanBase adapter.
 3. Stop classifying `SessionWorkspaceToolset` and `EnvToolset` as Runtime Builtins.
 4. Stop direct Runtime-local Skill authoring; replace with Hub-backed API adapter.
 
