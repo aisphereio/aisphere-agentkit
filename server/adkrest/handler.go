@@ -47,7 +47,6 @@ import (
 	"google.golang.org/adk/memory"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/server/adkrest/controllers"
-	"google.golang.org/adk/server/adkrest/internal/resumable"
 	"google.golang.org/adk/server/adkrest/internal/routers"
 	"google.golang.org/adk/server/adkrest/internal/services"
 	"google.golang.org/adk/session"
@@ -61,15 +60,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create debug telemetry service: %w", err)
 	}
-	var runStore *resumable.Store
 	var subAgentObserveStore controllers.SubAgentTaskObserveStore
 	if cfg.RuntimeConfig != nil {
 		redisCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		runStore, err = resumable.NewRedisStore(redisCtx, cfg.RuntimeConfig.Server.API.ResumableRuns)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create resumable run store: %w", err)
-		}
 		observeTTL := parseDurationDefault(cfg.RuntimeConfig.Runtime.SubAgentTasks.ObserveTTL, 6*time.Hour)
 		subAgentObserveStore, err = controllers.NewBestEffortSubAgentTaskObserveStore(redisCtx, cfg.RuntimeConfig.Server.API.ResumableRuns, observeTTL)
 		if err != nil {
@@ -98,10 +92,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			if err := projects.AutoMigrate(db); err != nil {
 				return nil, fmt.Errorf("failed to migrate platform projects: %w", err)
 			}
-			if !useNativePostgresRunStore(cfg.RuntimeConfig) {
-				if err := platformruns.AutoMigrate(db); err != nil {
-					return nil, fmt.Errorf("failed to migrate platform runs: %w", err)
-				}
+			if err := platformruns.AutoMigrate(db); err != nil {
+				return nil, fmt.Errorf("failed to migrate platform runs: %w", err)
 			}
 			if err := uploads.AutoMigrate(db); err != nil {
 				return nil, fmt.Errorf("failed to migrate platform uploads: %w", err)
@@ -123,15 +115,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			platformProjectService = projects.NewService(db)
 		}
 		if platformRunService == nil {
-			if useNativePostgresRunStore(cfg.RuntimeConfig) {
-				var err error
-				platformRunService, err = platformruns.NewPostgresService(context.Background(), resolvedPostgresDSN(cfg.RuntimeConfig), cfg.RuntimeConfig.Storage.Database.AutoMigrate)
-				if err != nil {
-					return nil, fmt.Errorf("failed to open postgres platform run store: %w", err)
-				}
-			} else {
-				platformRunService = platformruns.NewService(db)
-			}
+			platformRunService = platformruns.NewService(db)
 		}
 		if platformUploadService == nil {
 			platformUploadService = uploads.NewService(db, cfg.RuntimeConfig.Storage.Upload.Root)
@@ -160,10 +144,23 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create native sandbox session manager: %w", err)
 	}
+	runtimeController := controllers.NewRuntimeAPIController(
+		cfg.SessionService,
+		cfg.MemoryService,
+		cfg.AgentLoader,
+		cfg.ArtifactService,
+		cfg.SSEWriteTimeout,
+		cfg.PluginConfig,
+		false,
+		cfg.RuntimeConfig,
+		cfg.TraceRecorder,
+		platformUploadService,
+		subAgentObserveStore,
+		nativeSessionManager,
+	)
+	runtimeController.SetExecutionFactService(platformRunService)
 
 	router := mux.NewRouter().StrictSlash(true)
-	// TODO: Allow taking a prefix to allow customizing the path
-	// where the ADK REST API will be served.
 	setupRouter(router,
 		routers.NewAISphereAuthAPIRouter(controllers.NewAISphereAuthAPIController(cfg.RuntimeConfig)),
 		routers.NewMeAPIRouter(controllers.NewMeAPIController(cfg.RuntimeConfig)),
@@ -175,7 +172,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		routers.NewPlatformApprovalsAPIRouter(controllers.NewPlatformApprovalsAPIController(platformApprovalService)),
 		routers.NewPlatformImprovementsAPIRouter(controllers.NewPlatformImprovementsAPIController(platformImprovementService)),
 		routers.NewSessionsAPIRouter(controllers.NewSessionsAPIController(cfg.SessionService, subAgentObserveStore, nativeSessionManager)),
-		routers.NewRuntimeAPIRouter(controllers.NewRuntimeAPIController(cfg.SessionService, cfg.MemoryService, cfg.AgentLoader, cfg.ArtifactService, cfg.SSEWriteTimeout, cfg.PluginConfig, false, cfg.RuntimeConfig, cfg.TraceRecorder, runStore, platformUploadService, subAgentObserveStore, nativeSessionManager)),
+		routers.NewRuntimeAPIRouter(runtimeController),
 		routers.NewAppsAPIRouter(controllers.NewAppsAPIController(cfg.AgentLoader, cfg.BuilderAppsRoot, cfg.BuilderTmpRoot)),
 		routers.NewMetadataAPIRouter(controllers.NewMetadataAPIController(cfg.RuntimeConfig)),
 		routers.NewMCPAPIRouter(controllers.NewMCPAPIController(cfg.RuntimeConfig)),
@@ -208,9 +205,6 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 	sb := cfg.Skills.AIHub.Sandbox
 	if !sb.Enabled || (!sb.NativeSession && !strings.EqualFold(strings.TrimSpace(sb.Mode), "agent-native")) {
 		return nil, nil
-	}
-	if !sb.GoRunner {
-		return nil, fmt.Errorf("skills.aihub.sandbox.go_runner must be true: the sandbox session-worker Agent loop has been removed from the production runtime path")
 	}
 	endpoint := strings.TrimSpace(sb.AdapterEndpoint)
 	if endpoint == "" {
@@ -246,7 +240,6 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 		SkillsRoot:     cfg.Skills.Root,
 		DefaultProfile: sb.DefaultProfile,
 		ReadyTimeout:   readyTimeout,
-		GoRunner:       true,
 		RuntimeConfig:  cfg,
 	}, nil
 }
@@ -348,25 +341,4 @@ func bootstrapConfiguredPrincipals(ctx context.Context, svc users.Service, cfg r
 func setupRouter(router *mux.Router, subrouters ...routers.Router) *mux.Router {
 	routers.SetupSubRouters(router, subrouters...)
 	return router
-}
-
-func useNativePostgresRunStore(cfg *runtimeconfig.Config) bool {
-	if cfg == nil {
-		return false
-	}
-	dbType := strings.ToLower(strings.TrimSpace(cfg.Storage.Database.Type))
-	return (dbType == "postgres" || dbType == "postgresql" || dbType == "pg") && resolvedPostgresDSN(cfg) != ""
-}
-
-func resolvedPostgresDSN(cfg *runtimeconfig.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	if strings.TrimSpace(cfg.Storage.Database.DSN) != "" {
-		return strings.TrimSpace(cfg.Storage.Database.DSN)
-	}
-	if strings.TrimSpace(cfg.Storage.Database.DSNEnv) != "" {
-		return strings.TrimSpace(os.Getenv(cfg.Storage.Database.DSNEnv))
-	}
-	return ""
 }

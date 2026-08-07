@@ -20,74 +20,62 @@ import (
 	"google.golang.org/adk/server/adkrest/controllers"
 )
 
-// RuntimeAPIRouter defines the routes for the Runtime API.
+// RuntimeAPIRouter defines the AISphere Runtime transport routes. Production
+// text execution is native ADK-Go only; durable replay is exposed by the
+// platform run Event Ledger router, not the legacy Redis resumable protocol.
 type RuntimeAPIRouter struct {
 	runtimeController *controllers.RuntimeAPIController
 }
 
-// NewRuntimeAPIRouter creates a new RuntimeAPIRouter.
 func NewRuntimeAPIRouter(controller *controllers.RuntimeAPIController) *RuntimeAPIRouter {
 	return &RuntimeAPIRouter{runtimeController: controller}
 }
 
-// Routes returns the routes for the Runtime API.
 func (r *RuntimeAPIRouter) Routes() Routes {
 	return Routes{
-		Route{
+		{
 			Name:        "RunAgent",
 			Methods:     []string{http.MethodPost, http.MethodOptions},
 			Pattern:     "/run",
-			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.RunHandler),
+			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.RunNativeOnlyHandler),
 		},
-		Route{
+		{
 			Name:        "RunAgentSse",
 			Methods:     []string{http.MethodPost, http.MethodOptions},
 			Pattern:     "/run_sse",
-			HandlerFunc: r.runtimeController.RunSSEHandler,
+			HandlerFunc: r.runtimeController.RunNativeOnlySSEHandler,
 		},
-		Route{
-			Name:        "ResumeAgentSse",
-			Methods:     []string{http.MethodGet, http.MethodOptions},
-			Pattern:     "/run_sse/resume",
-			HandlerFunc: r.runtimeController.ResumeRunSSEHandler,
-		},
-		Route{
+		{
 			Name:        "SubAgentTaskEvents",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/subagent_tasks",
 			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.SubAgentTaskEventsHandler),
 		},
-		Route{
+		{
 			Name:        "RuntimeEvents",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/runtime_events",
 			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.RuntimeEventsHandler),
 		},
-		Route{
+		{
 			Name:        "SessionWorkspaceList",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/session_workspace",
 			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.SessionWorkspaceListHandler),
 		},
-		Route{
+		{
 			Name:        "SessionWorkspaceRead",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/session_workspace/read",
 			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.SessionWorkspaceReadHandler),
 		},
-		Route{
+		{
 			Name:        "BusinessLogStream",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/business_logs/stream",
 			HandlerFunc: r.runtimeController.BusinessLogStreamHandler,
 		},
-		Route{
-			Name:        "CancelAgentRun",
-			Methods:     []string{http.MethodPost, http.MethodOptions},
-			Pattern:     "/run_sse/cancel",
-			HandlerFunc: controllers.NewErrorHandler(r.runtimeController.CancelRunHandler),
-		},
-		Route{
+		{
 			Name:        "RunAgentLive",
 			Methods:     []string{http.MethodGet, http.MethodOptions},
 			Pattern:     "/run_live",
