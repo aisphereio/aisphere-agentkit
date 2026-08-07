@@ -37,6 +37,45 @@ func TestRegistryFailsClosedForUnknownRuntimeType(t *testing.T) {
 	}
 }
 
+func TestRegistryDoesNotExposeUnselectedBuiltins(t *testing.T) {
+	registry := New()
+	if err := registry.Register("builtin", ResolverFunc(func(binding runtimeplan.ToolBinding) (tool.Tool, error) {
+		return fakeTool{name: binding.Name}, nil
+	})); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	tools, err := registry.Resolve(&runtimeplan.RuntimePlan{})
+	if err != nil {
+		t.Fatalf("Resolve(empty plan) error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("Resolve(empty plan) tools = %d, want 0", len(tools))
+	}
+
+	tools, err = registry.Resolve(&runtimeplan.RuntimePlan{Tools: []runtimeplan.ToolBinding{
+		{Name: "memory.search", RuntimeType: "builtin"},
+	}})
+	if err != nil {
+		t.Fatalf("Resolve(selected builtin) error = %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name() != "memory.search" {
+		t.Fatalf("unexpected selected tools: %+v", tools)
+	}
+}
+
+func TestLegacyInternalAliasNormalizesToBuiltin(t *testing.T) {
+	registry := New()
+	if err := registry.Register("internal", ResolverFunc(func(binding runtimeplan.ToolBinding) (tool.Tool, error) {
+		return fakeTool{name: binding.Name}, nil
+	})); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if got := registry.RuntimeTypes(); len(got) != 1 || got[0] != ConnectorBuiltin {
+		t.Fatalf("RuntimeTypes() = %#v, want [%q]", got, ConnectorBuiltin)
+	}
+}
+
 type fakeToolset struct{ name string }
 
 func (f fakeToolset) Name() string { return f.name }
