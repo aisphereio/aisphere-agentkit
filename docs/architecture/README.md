@@ -7,7 +7,7 @@
 - [SYSTEM-BOUNDARIES.md](SYSTEM-BOUNDARIES.md) — AISphere 跨组件职责边界、对象 Owner 与协作契约。
 - [MODULE-CATALOG.md](MODULE-CATALOG.md) — Hub / Runtime / Sandbox / IAM / Model Gateway 的模块功能清单、接口和架构债务台账。
 - [STORAGE-RETRIEVAL-RESERVATION.md](STORAGE-RETRIEVAL-RESERVATION.md) — Conversation / File / Memory / Retrieval 的逻辑位置与未来 OceanBase adapter 预留；当前不实现临时存储后端。
-- [TOOL-INVENTORY-V1.md](TOOL-INVENTORY-V1.md) — 当前 `configurable/tool/*` 能力逐项分类与迁移台账；明确 Runtime Builtin、Runtime Primitive、Sandbox、MCP、Model-native、Domain/Retire 的去向。
+- [TOOL-INVENTORY-V1.md](TOOL-INVENTORY-V1.md) — 当前 `configurable/tool/*` 能力逐项分类与迁移台账；Builtin V1 第一批实现及冲突 Tool 退役已进入代码阶段。
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md) — Runtime 只保留一套 ADK-Go Agent Loop。
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
 - [ADR-003: Tool Contract 与统一 Invocation Pipeline V1](ADR-003-tool-contract-v1.md) — Tool V1 总体分层与统一执行链，目前为 Proposed，继续随代码校准。
