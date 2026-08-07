@@ -1,6 +1,6 @@
 // Package toolruntime maps Hub tool bindings to executable ADK tool adapters.
-// It is the single seam where sandbox tools, MCP tools, and internal Runtime
-// tools become visible to the ADK-Go agent.
+// It is the single seam where sandbox tools, MCP tools, and Runtime-owned
+// builtin tools become visible to the ADK-Go agent.
 package toolruntime
 
 import (
@@ -10,6 +10,13 @@ import (
 
 	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/tool"
+)
+
+const (
+	ConnectorBuiltin = "builtin"
+	ConnectorSandbox = "sandbox"
+	ConnectorMCP     = "mcp"
+	ConnectorHTTP    = "http"
 )
 
 type Resolver interface {
@@ -41,33 +48,33 @@ func New() *Registry {
 	return &Registry{resolvers: map[string]Resolver{}, toolsetResolvers: map[string]ToolsetResolver{}}
 }
 
-func (r *Registry) Register(runtimeType string, resolver Resolver) error {
-	runtimeType = normalizeRuntimeType(runtimeType)
-	if runtimeType == "" {
-		return fmt.Errorf("runtime type is required")
+func (r *Registry) Register(connectorKind string, resolver Resolver) error {
+	connectorKind = normalizeConnectorKind(connectorKind)
+	if connectorKind == "" {
+		return fmt.Errorf("connector kind is required")
 	}
 	if resolver == nil {
-		return fmt.Errorf("resolver is required for runtime type %q", runtimeType)
+		return fmt.Errorf("resolver is required for connector kind %q", connectorKind)
 	}
 	if r.resolvers == nil {
 		r.resolvers = map[string]Resolver{}
 	}
-	r.resolvers[runtimeType] = resolver
+	r.resolvers[connectorKind] = resolver
 	return nil
 }
 
-func (r *Registry) RegisterToolset(runtimeType string, resolver ToolsetResolver) error {
-	runtimeType = normalizeRuntimeType(runtimeType)
-	if runtimeType == "" {
-		return fmt.Errorf("runtime type is required")
+func (r *Registry) RegisterToolset(connectorKind string, resolver ToolsetResolver) error {
+	connectorKind = normalizeConnectorKind(connectorKind)
+	if connectorKind == "" {
+		return fmt.Errorf("connector kind is required")
 	}
 	if resolver == nil {
-		return fmt.Errorf("toolset resolver is required for runtime type %q", runtimeType)
+		return fmt.Errorf("toolset resolver is required for connector kind %q", connectorKind)
 	}
 	if r.toolsetResolvers == nil {
 		r.toolsetResolvers = map[string]ToolsetResolver{}
 	}
-	r.toolsetResolvers[runtimeType] = resolver
+	r.toolsetResolvers[connectorKind] = resolver
 	return nil
 }
 
@@ -76,9 +83,9 @@ func (r *Registry) Resolve(plan *runtimeplan.RuntimePlan) ([]tool.Tool, error) {
 	return tools, err
 }
 
-// ResolveAll resolves both individual tools and lazy toolsets. Toolsets are
-// kept as tool.Toolset so ADK can discover remote tools at request time (MCP
-// sessions are intentionally lazy).
+// ResolveAll resolves only the Tool bindings explicitly selected in the
+// RuntimePlan. Registry contents are an implementation capability superset and
+// are never implicitly exposed to an Agent.
 func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []tool.Toolset, error) {
 	if plan == nil {
 		return nil, nil, fmt.Errorf("runtime plan is required")
@@ -89,11 +96,13 @@ func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []too
 		if strings.TrimSpace(binding.Name) == "" {
 			continue
 		}
-		runtimeType := normalizeRuntimeType(binding.RuntimeType)
-		if runtimeType == "" {
-			runtimeType = "internal"
+		connectorKind := normalizeConnectorKind(binding.RuntimeType)
+		if connectorKind == "" {
+			// Transitional compatibility with pre-V1 Hub snapshots. New V1
+			// contracts must always carry a typed connector kind.
+			connectorKind = ConnectorBuiltin
 		}
-		if resolver := r.resolvers[runtimeType]; resolver != nil {
+		if resolver := r.resolvers[connectorKind]; resolver != nil {
 			resolved, err := resolver.ResolveTool(binding)
 			if err != nil {
 				return nil, nil, fmt.Errorf("resolve tool %s: %w", binding.Name, err)
@@ -104,7 +113,7 @@ func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []too
 			tools = append(tools, resolved)
 			continue
 		}
-		if resolver := r.toolsetResolvers[runtimeType]; resolver != nil {
+		if resolver := r.toolsetResolvers[connectorKind]; resolver != nil {
 			resolved, err := resolver.ResolveToolset(binding)
 			if err != nil {
 				return nil, nil, fmt.Errorf("resolve toolset %s: %w", binding.Name, err)
@@ -115,7 +124,7 @@ func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []too
 			toolsets = append(toolsets, resolved)
 			continue
 		}
-		return nil, nil, fmt.Errorf("no tool resolver registered for runtime type %q tool %q", runtimeType, binding.Name)
+		return nil, nil, fmt.Errorf("no tool resolver registered for connector kind %q tool %q", connectorKind, binding.Name)
 	}
 	return tools, toolsets, nil
 }
@@ -137,17 +146,17 @@ func (r *Registry) RuntimeTypes() []string {
 	return out
 }
 
-func normalizeRuntimeType(value string) string {
+func normalizeConnectorKind(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
 	case "":
 		return value
-	case "go", "builtin", "function":
-		return "internal"
-	case "sandbox-tool", "sandbox_tools":
-		return "sandbox"
-	case "mcp-toolset", "mcp_server":
-		return "mcp"
+	case "internal", "go", "function", ConnectorBuiltin:
+		return ConnectorBuiltin
+	case "sandbox-tool", "sandbox_tools", ConnectorSandbox:
+		return ConnectorSandbox
+	case "mcp-toolset", "mcp_server", ConnectorMCP:
+		return ConnectorMCP
 	default:
 		return value
 	}
