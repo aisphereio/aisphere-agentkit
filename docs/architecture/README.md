@@ -9,6 +9,8 @@
 - [STORAGE-RETRIEVAL-RESERVATION.md](STORAGE-RETRIEVAL-RESERVATION.md) — Conversation / File / Memory / Retrieval 的逻辑位置与未来 OceanBase adapter 预留；当前不实现临时存储后端。
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md) — Runtime 只保留一套 ADK-Go Agent Loop。
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
+- [ADR-003: Tool Contract 与统一 Invocation Pipeline V1](ADR-003-tool-contract-v1.md) — Tool V1 总体分层与统一执行链，目前为 Proposed，继续随代码校准。
+- [ADR-004: Builtin Tool V1](ADR-004-builtin-tools-v1.md) — Runtime code-first Builtin、Hub catalog mirror、Agent 显式选择及 V1 无独立 Builtin AuthZ 规则。
 
 ## 解释优先级
 
@@ -107,7 +109,7 @@ Redis resumable buffer 作为历史事实源
 
 ```text
 1. Runtime legacy 执行链收口
-2. Tool Compiler + Unified Invocation Pipeline
+2. BuiltinRegistry + Tool Compiler + Unified Invocation Pipeline
 3. server-side ApprovalGrant + Credential Broker
 4. Hub immutable revision/version pinning
 5. Sandbox Tool Server / Lease contract
