@@ -2,7 +2,6 @@ package sessionnative
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,12 +16,14 @@ import (
 	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/internal/sandboxclient"
 	"google.golang.org/adk/internal/sandboxruntime"
-	"google.golang.org/adk/internal/sessionworkerclient"
 	"google.golang.org/adk/internal/skillruntime"
 	"google.golang.org/adk/internal/toolruntime"
 	"google.golang.org/adk/tool"
 )
 
+// Manager binds a Runtime session to an executor-only Sandbox lease.
+// The Agent loop always remains in AISphere Runtime; Sandbox contributes
+// workspace/executor capabilities through its tools endpoint.
 type Manager struct {
 	Sandbox *sandboxclient.Client
 	Hub     *aihubruntime.Client
@@ -34,7 +35,6 @@ type Manager struct {
 	UserID         string
 	DefaultProfile string
 	ReadyTimeout   time.Duration
-	GoRunner       bool
 	RuntimeConfig  *runtimeconfig.Config
 
 	mu     sync.Mutex
@@ -86,10 +86,11 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	if strings.TrimSpace(agentID) == "" {
 		return nil, fmt.Errorf("agent id/app name is required")
 	}
+
 	key := cacheKey(agentID, req.UserID, req.SessionID)
 	m.mu.Lock()
 	if existing := m.leases[key]; existing != nil && existing.Sandbox != nil &&
-		(existing.Sandbox.WorkerEndpoint != "" || (m.GoRunner && existing.Sandbox.ToolsEndpoint != "")) &&
+		strings.TrimSpace(existing.Sandbox.ToolsEndpoint) != "" &&
 		(req.SkipAgentResolve || m.Hub == nil || !m.Hub.Enabled() || existing.Plan != nil) {
 		m.mu.Unlock()
 		return existing, nil
@@ -129,6 +130,7 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 		templateRef = firstNonEmpty(templateRef, snap.Sandbox.TemplateRef)
 		warmPoolRef = firstNonEmpty(warmPoolRef, snap.Sandbox.WarmPoolRef)
 	}
+
 	profile = firstNonEmpty(profile, m.DefaultProfile)
 	if profile == "" && templateRef == "" {
 		return nil, fmt.Errorf("sandbox profile or templateRef is required")
@@ -142,17 +144,16 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 		"native":    true,
 	}
 	if snapshot != nil {
-		metadata["agentDefinition"] = map[string]interface{}{
-			"entryPoint": snapshot.Definition.EntryPoint,
-			"files":      snapshot.Definition.Files,
-			"model":      resolvedModelSpec(snapshot),
-		}
+		// Transitional metadata consumed by the current executor/tool-server
+		// surface. Agent definition/model execution is deliberately not copied
+		// into Sandbox: the Agent loop and model stay in Runtime.
 		metadata["runtimePlan"] = runtimePlanMetadata(plan)
 		metadata["allowedTools"] = allowedTools(plan, snapshot)
 		metadata["toolSchemas"] = toolSchemas(plan, snapshot)
 		metadata["skillRefs"] = skillRefs(plan, snapshot)
 		metadata["snapshotPolicy"] = snapshot.Policy
 	}
+
 	lease, err := m.Sandbox.Ensure(ctx, sandboxclient.EnsureRequest{
 		RuntimeID:   m.RuntimeID,
 		SessionID:   req.SessionID,
@@ -170,7 +171,7 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	if err != nil {
 		return nil, err
 	}
-	if lease.WorkerEndpoint == "" && (!m.GoRunner || lease.ToolsEndpoint == "") {
+	if strings.TrimSpace(lease.ToolsEndpoint) == "" {
 		timeout := m.ReadyTimeout
 		if timeout <= 0 {
 			timeout = 90 * time.Second
@@ -182,29 +183,20 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 			return nil, err
 		}
 	}
-	if m.GoRunner && lease.ToolsEndpoint == "" {
-		return nil, fmt.Errorf("sandbox %s has no tools endpoint", lease.SandboxID)
+	if strings.TrimSpace(lease.ToolsEndpoint) == "" {
+		return nil, fmt.Errorf("sandbox %s has no executor tools endpoint", lease.SandboxID)
 	}
-	if !m.GoRunner && lease.WorkerEndpoint == "" {
-		return nil, fmt.Errorf("sandbox %s has no worker endpoint", lease.SandboxID)
-	}
-	if !m.GoRunner {
-		w := sessionworkerclient.New(lease.WorkerEndpoint, lease.LeaseToken)
-		readyCtx, cancel := context.WithTimeout(ctx, m.readyTimeout())
-		defer cancel()
-		if err := waitWorkerReady(readyCtx, w, time.Second); err != nil {
-			return nil, err
-		}
-	}
+
 	if snapshot != nil {
 		if err := m.materializeSnapshot(ctx, lease, snapshot); err != nil {
 			return nil, err
 		}
 	}
+
 	skillRoot := ""
-	if m.GoRunner && snapshot != nil && len(snapshot.Skills) > 0 {
+	if snapshot != nil && len(snapshot.Skills) > 0 {
 		if strings.TrimSpace(m.SkillsRoot) == "" {
-			return nil, fmt.Errorf("GoRunner requires a configured skills root")
+			return nil, fmt.Errorf("runtime requires a configured skills root")
 		}
 		var err error
 		skillRoot, err = aihubruntime.PrepareAgentSnapshotSkillRoot(m.SkillsRoot, snapshot)
@@ -212,7 +204,16 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 			return nil, err
 		}
 	}
-	out := &SessionLease{SessionID: req.SessionID, AgentID: agentID, SnapshotID: snapshotID, Profile: profile, Sandbox: lease, Plan: plan, SkillRoot: skillRoot}
+
+	out := &SessionLease{
+		SessionID: req.SessionID,
+		AgentID: agentID,
+		SnapshotID: snapshotID,
+		Profile: profile,
+		Sandbox: lease,
+		Plan: plan,
+		SkillRoot: skillRoot,
+	}
 	m.mu.Lock()
 	if m.leases == nil {
 		m.leases = map[string]*SessionLease{}
@@ -220,30 +221,6 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	m.leases[key] = out
 	m.mu.Unlock()
 	return out, nil
-}
-
-func waitWorkerReady(ctx context.Context, worker *sessionworkerclient.Client, interval time.Duration) error {
-	if interval <= 0 {
-		interval = time.Second
-	}
-	var lastErr error
-	for {
-		attemptCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		err := worker.Ready(attemptCtx)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				return lastErr
-			}
-			return ctx.Err()
-		case <-time.After(interval):
-		}
-	}
 }
 
 func toolDescription(item aihubruntime.ToolSnapshotItem) string {
@@ -260,15 +237,12 @@ func toolDescription(item aihubruntime.ToolSnapshotItem) string {
 	return "Authorized Agent tool"
 }
 
-// materializeSnapshot transfers only the already-authorized Skill payload into
-// the session workspace. Tool authorization is carried in the sandbox
-// manifest and consumed by the worker; the worker never receives Hub tokens.
+// materializeSnapshot copies only Skill payloads that sandbox executors may
+// need. Agent definitions, model configuration and Agent-loop state remain in
+// Runtime and are never materialized into the Sandbox workspace.
 func (m *Manager) materializeSnapshot(ctx context.Context, lease *sandboxclient.Lease, snapshot *aihubruntime.AgentSnapshot) error {
 	if lease == nil || snapshot == nil || strings.TrimSpace(lease.ToolsEndpoint) == "" {
 		return nil
-	}
-	if err := m.materializeAgentDefinition(ctx, lease, snapshot); err != nil {
-		return err
 	}
 	for _, item := range snapshot.Skills {
 		if strings.TrimSpace(item.CachePath) == "" || strings.TrimSpace(item.Name) == "" {
@@ -282,47 +256,6 @@ func (m *Manager) materializeSnapshot(ctx context.Context, lease *sandboxclient.
 		}
 	}
 	return nil
-}
-
-func (m *Manager) materializeAgentDefinition(ctx context.Context, lease *sandboxclient.Lease, snapshot *aihubruntime.AgentSnapshot) error {
-	if snapshot == nil || len(snapshot.Definition.Files) == 0 {
-		return nil
-	}
-	agentID := filesystemName(firstNonEmpty(snapshot.AgentID, "agent"))
-	base := filepath.ToSlash(filepath.Join(".aisphere", "agents", agentID))
-	for rawPath, content := range snapshot.Definition.Files {
-		rel, err := cleanDefinitionPath(rawPath)
-		if err != nil {
-			return fmt.Errorf("invalid agent definition path %q: %w", rawPath, err)
-		}
-		if len(content) > 512*1024 {
-			return fmt.Errorf("agent definition file %s exceeds 512KiB sandbox materialization limit", rel)
-		}
-		if err := m.writeWorkspaceFile(ctx, lease, filepath.ToSlash(filepath.Join(base, rel)), content); err != nil {
-			return fmt.Errorf("materialize agent definition %s: %w", rel, err)
-		}
-	}
-	manifest := map[string]any{
-		"agentId":       snapshot.AgentID,
-		"snapshotId":    snapshot.SnapshotID,
-		"agentVersion":  snapshot.AgentVersion,
-		"agentRevision": snapshot.AgentRevision,
-		"entryPoint":    snapshot.Definition.EntryPoint,
-		"model":         resolvedModelSpec(snapshot),
-	}
-	b, _ := json.MarshalIndent(manifest, "", "  ")
-	return m.writeWorkspaceFile(ctx, lease, filepath.ToSlash(filepath.Join(base, "agent-snapshot.json")), string(b))
-}
-
-func resolvedModelSpec(snapshot *aihubruntime.AgentSnapshot) aihubruntime.ModelSpec {
-	if snapshot == nil {
-		return aihubruntime.ModelSpec{}
-	}
-	model := snapshot.Model
-	if model.Profile == "" && model.Model == "" && model.Provider == "" && model.BaseURL == "" && model.APIFormat == "" && len(model.Metadata) == 0 {
-		model = snapshot.Definition.Model
-	}
-	return model
 }
 
 func (m *Manager) copySkillToSandbox(ctx context.Context, lease *sandboxclient.Lease, source, name string) error {
@@ -396,48 +329,6 @@ func isTransientSandboxCallError(err error) bool {
 		strings.Contains(msg, "status=502")
 }
 
-func cleanDefinitionPath(raw string) (string, error) {
-	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(raw)))
-	if cleaned == "" || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
-		return "", fmt.Errorf("path must be relative and stay within the agent definition")
-	}
-	return cleaned, nil
-}
-
-func filesystemName(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "agent"
-	}
-	var b strings.Builder
-	for _, r := range raw {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	out := strings.Trim(b.String(), ".")
-	if out == "" {
-		return "agent"
-	}
-	return out
-}
-
-func (m *Manager) WorkerClient(lease *SessionLease) (*sessionworkerclient.Client, error) {
-	if lease == nil || lease.Sandbox == nil || lease.Sandbox.WorkerEndpoint == "" {
-		return nil, fmt.Errorf("session has no native sandbox worker endpoint")
-	}
-	return sessionworkerclient.New(lease.Sandbox.WorkerEndpoint, lease.Sandbox.LeaseToken), nil
-}
-
 func (m *Manager) ToolRegistryForLease(lease *SessionLease) (*toolruntime.Registry, error) {
 	if m == nil || m.Sandbox == nil {
 		return nil, fmt.Errorf("native sandbox client is not configured")
@@ -447,7 +338,10 @@ func (m *Manager) ToolRegistryForLease(lease *SessionLease) (*toolruntime.Regist
 	}
 	registry := toolruntime.New()
 	if err := registry.Register("sandbox", sandboxruntime.Resolver{
-		Caller: m.Sandbox, SandboxID: lease.Sandbox.SandboxID, SnapshotID: lease.SnapshotID, SessionID: lease.SessionID,
+		Caller: m.Sandbox,
+		SandboxID: lease.Sandbox.SandboxID,
+		SnapshotID: lease.SnapshotID,
+		SessionID: lease.SessionID,
 	}); err != nil {
 		return nil, err
 	}
@@ -493,7 +387,6 @@ func (l *SessionLease) StateDelta() map[string]any {
 			"sandboxId":       l.Sandbox.SandboxID,
 			"phase":           l.Sandbox.Phase,
 			"driver":          l.Sandbox.Driver,
-			"workerEndpoint":  l.Sandbox.WorkerEndpoint,
 			"toolsEndpoint":   l.Sandbox.ToolsEndpoint,
 			"browserEndpoint": l.Sandbox.BrowserEndpoint,
 			"workspace":       l.Sandbox.Workspace,
