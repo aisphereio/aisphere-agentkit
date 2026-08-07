@@ -110,12 +110,7 @@ func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []too
 		if strings.TrimSpace(binding.Name) == "" {
 			continue
 		}
-		connectorKind := normalizeConnectorKind(binding.RuntimeType)
-		if connectorKind == "" {
-			// Transitional compatibility with pre-V1 Hub snapshots. New V1
-			// contracts must always carry a typed connector kind.
-			connectorKind = ConnectorBuiltin
-		}
+		connectorKind := connectorKindForBinding(binding)
 		if resolver := r.resolvers[connectorKind]; resolver != nil {
 			resolved, err := resolver.ResolveTool(binding)
 			if err != nil {
@@ -141,6 +136,29 @@ func (r *Registry) ResolveAll(plan *runtimeplan.RuntimePlan) ([]tool.Tool, []too
 		return nil, nil, fmt.Errorf("no tool resolver registered for connector kind %q tool %q", connectorKind, binding.Name)
 	}
 	return tools, toolsets, nil
+}
+
+// connectorKindForBinding contains the only compatibility correction for the
+// legacy map-based Hub Tool contract. Historical Hub builtin seeds tagged
+// workspace/browser tools as runtime.type=builtin while execution.placement was
+// already sandbox. The trusted Runtime must never execute those tools locally,
+// so sandbox placement wins over the stale builtin marker.
+//
+// Typed Tool V1 ExecutionSpec removes this compatibility rule: connector.kind
+// will be authoritative and this function can collapse to normalizeConnectorKind.
+func connectorKindForBinding(binding runtimeplan.ToolBinding) string {
+	connectorKind := normalizeConnectorKind(binding.RuntimeType)
+	placement, _ := binding.Execution["placement"].(string)
+	if strings.EqualFold(strings.TrimSpace(placement), ConnectorSandbox) &&
+		(connectorKind == "" || connectorKind == ConnectorBuiltin) {
+		return ConnectorSandbox
+	}
+	if connectorKind == "" {
+		// Transitional compatibility with pre-V1 Hub snapshots. New V1 contracts
+		// must always carry a typed connector kind.
+		return ConnectorBuiltin
+	}
+	return connectorKind
 }
 
 func (r *Registry) RuntimeTypes() []string {
