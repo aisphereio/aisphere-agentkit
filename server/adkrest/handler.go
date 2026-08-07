@@ -161,8 +161,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	runtimeController.SetExecutionFactService(platformRunService)
 
 	router := mux.NewRouter().StrictSlash(true)
-	// TODO: Allow taking a prefix to allow customizing the path
-	// where the ADK REST API will be served.
 	setupRouter(router,
 		routers.NewAISphereAuthAPIRouter(controllers.NewAISphereAuthAPIController(cfg.RuntimeConfig)),
 		routers.NewMeAPIRouter(controllers.NewMeAPIController(cfg.RuntimeConfig)),
@@ -208,9 +206,6 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 	if !sb.Enabled || (!sb.NativeSession && !strings.EqualFold(strings.TrimSpace(sb.Mode), "agent-native")) {
 		return nil, nil
 	}
-	if !sb.GoRunner {
-		return nil, fmt.Errorf("skills.aihub.sandbox.go_runner must be true: the sandbox session-worker Agent loop has been removed from the production runtime path")
-	}
 	endpoint := strings.TrimSpace(sb.AdapterEndpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("skills.aihub.sandbox.adapter_endpoint is required for native sandbox sessions")
@@ -245,7 +240,6 @@ func newNativeSessionManager(cfg *runtimeconfig.Config) (*sessionnative.Manager,
 		SkillsRoot:     cfg.Skills.Root,
 		DefaultProfile: sb.DefaultProfile,
 		ReadyTimeout:   readyTimeout,
-		GoRunner:       true,
 		RuntimeConfig:  cfg,
 	}, nil
 }
