@@ -10,29 +10,7 @@ import (
 	"google.golang.org/adk/internal/sandboxclient"
 )
 
-func TestCleanDefinitionPath(t *testing.T) {
-	for _, raw := range []string{"root_agent.yaml", "nested/agent.yaml", `nested\agent.yaml`} {
-		if _, err := cleanDefinitionPath(raw); err != nil {
-			t.Fatalf("cleanDefinitionPath(%q) unexpected error: %v", raw, err)
-		}
-	}
-	for _, raw := range []string{"", ".", "..", "../secret", "/abs/root_agent.yaml", "nested/../../secret"} {
-		if _, err := cleanDefinitionPath(raw); err == nil {
-			t.Fatalf("cleanDefinitionPath(%q) expected error", raw)
-		}
-	}
-}
-
-func TestFilesystemName(t *testing.T) {
-	if got, want := filesystemName("research.agent/v1"), "research.agent_v1"; got != want {
-		t.Fatalf("filesystemName() = %q, want %q", got, want)
-	}
-	if got := filesystemName("..."); got != "agent" {
-		t.Fatalf("filesystemName empty fallback = %q, want agent", got)
-	}
-}
-
-func TestEnsureSessionGoRunnerAcceptsToolsEndpointWithoutWorker(t *testing.T) {
+func TestEnsureSessionAcceptsToolsEndpointWithoutWorker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/sandboxes/ensure" {
 			t.Fatalf("path = %q", r.URL.Path)
@@ -44,7 +22,6 @@ func TestEnsureSessionGoRunnerAcceptsToolsEndpointWithoutWorker(t *testing.T) {
 	manager := &Manager{
 		Sandbox:        sandboxclient.New(server.URL, ""),
 		DefaultProfile: "agent-default",
-		GoRunner:       true,
 	}
 	lease, err := manager.EnsureSession(t.Context(), CreateSessionRequest{AgentID: "agent-1", SessionID: "session-1"})
 	if err != nil {
@@ -70,7 +47,7 @@ func TestEnsureSessionCanBootstrapBeforeHubApprovalResolve(t *testing.T) {
 	defer sandboxServer.Close()
 	manager := &Manager{
 		Sandbox: sandboxclient.New(sandboxServer.URL, ""), Hub: hub,
-		DefaultProfile: "agent-default", GoRunner: true,
+		DefaultProfile: "agent-default",
 	}
 	lease, err := manager.EnsureSession(t.Context(), CreateSessionRequest{
 		AgentID: "agent-1", SessionID: "session-1", SkipAgentResolve: true,
