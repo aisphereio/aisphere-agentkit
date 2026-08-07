@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-07
 - Scope: Hub / Runtime
-- Verification checkpoint: first code-owned Builtin batch and first retirement batch are implemented on the Tool V1 branch
+- Verification rule: each Builtin migration batch must pass Runtime Build/Test before another execution class is reclassified
 
 ## Decision
 
