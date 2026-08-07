@@ -116,6 +116,39 @@ func TestLegacyInternalAliasNormalizesToBuiltin(t *testing.T) {
 	}
 }
 
+func TestServiceConnectorHasDedicatedCanonicalKind(t *testing.T) {
+	registry := New()
+	if err := registry.Register("internal_service", ResolverFunc(func(binding runtimeplan.ToolBinding) (tool.Tool, error) {
+		return fakeTool{name: "service:" + binding.Name}, nil
+	})); err != nil {
+		t.Fatalf("Register(service) error = %v", err)
+	}
+
+	if got := registry.RuntimeTypes(); len(got) != 1 || got[0] != ConnectorService {
+		t.Fatalf("RuntimeTypes() = %#v, want [%q]", got, ConnectorService)
+	}
+
+	tools, err := registry.Resolve(&runtimeplan.RuntimePlan{Tools: []runtimeplan.ToolBinding{{
+		Name:        "skill.publish",
+		RuntimeType: "platform-service",
+	}}})
+	if err != nil {
+		t.Fatalf("Resolve(service) error = %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name() != "service:skill.publish" {
+		t.Fatalf("unexpected service tools: %+v", tools)
+	}
+}
+
+func TestLegacyInternalDoesNotAliasToService(t *testing.T) {
+	if got := normalizeConnectorKind("internal"); got != ConnectorBuiltin {
+		t.Fatalf("normalizeConnectorKind(internal) = %q, want %q", got, ConnectorBuiltin)
+	}
+	if got := normalizeConnectorKind("internal-service"); got != ConnectorService {
+		t.Fatalf("normalizeConnectorKind(internal-service) = %q, want %q", got, ConnectorService)
+	}
+}
+
 type fakeToolset struct{ name string }
 
 func (f fakeToolset) Name() string { return f.name }
