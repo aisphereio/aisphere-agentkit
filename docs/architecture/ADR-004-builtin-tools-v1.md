@@ -201,9 +201,11 @@ Such code belongs to the Sandbox/package execution path.
 
 ## 10. Migration
 
-1. Add Runtime-owned `BuiltinRegistry` and descriptor manifest.
-2. Keep the existing configurable factory registry only as a temporary compatibility source.
-3. Move current true Runtime Builtins into explicit code registrations.
-4. Reclassify `workspace.*`, browser/process/Python/Shell capabilities as Sandbox tools rather than Runtime Builtins.
-5. Replace Hub-owned hard-coded Builtin seeds with Runtime manifest reconciliation.
-6. Remove legacy aliases (`go`, `function`, generic `internal`) after all AgentRevision bindings use typed `builtin` connectors.
+1. Add Runtime-owned `BuiltinRegistry` and descriptor manifest. **Completed.**
+2. Keep the existing configurable factory registry only as a temporary compatibility source. **In progress; V1 pinned bindings already fail closed and cannot fall back.**
+3. Move current true Runtime Builtins into explicit code registrations. **First batch completed:** `save_artifact`, `load_artifacts`, `list_artifacts`, `delete_artifact`, `load_memory`, `get_user_choice`, `request_user_form`.
+4. Reclassify `workspace.*`, browser/process/Python/Shell capabilities as Sandbox tools rather than Runtime Builtins. **Next P0.**
+5. Replace Hub-owned hard-coded Builtin seeds with Runtime manifest reconciliation. **Pending.**
+6. Remove legacy aliases (`go`, `function`, generic `internal`) after all AgentRevision bindings use typed `builtin` connectors. **Pending.**
+
+The current migration inventory is maintained in `TOOL-INVENTORY-V1.md`. `PlanRunToolset` and the temporary local `files_retrieval` aliases have already been retired from global configurable resolution because they conflict with the accepted Run and Retrieval architecture.
