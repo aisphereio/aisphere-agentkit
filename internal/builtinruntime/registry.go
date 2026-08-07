@@ -61,8 +61,23 @@ type Registry struct {
 	entries map[string]entry
 }
 
+var processRegistry = NewRegistry()
+
 func NewRegistry() *Registry {
 	return &Registry{entries: map[string]entry{}}
+}
+
+// DefaultRegistry returns the Runtime process registry. New Builtin
+// implementations migrate into this registry gradually; old configurable
+// factories remain a compatibility path only until their descriptor is moved.
+func DefaultRegistry() *Registry {
+	return processRegistry
+}
+
+// RegisterBuiltin registers one code-owned implementation in the process
+// registry. Runtime bootstrap code should call this for production Builtins.
+func RegisterBuiltin(descriptor Descriptor, factory Factory) error {
+	return processRegistry.Register(descriptor, factory)
 }
 
 // Register adds one exact builtin implementation. Duplicate id+version entries
@@ -107,6 +122,36 @@ func (r *Registry) Register(descriptor Descriptor, factory Factory) error {
 	}
 	r.entries[key] = entry{descriptor: cloneDescriptor(descriptor), factory: factory}
 	return nil
+}
+
+// Has reports whether the registry can resolve the requested Builtin under the
+// same version rules as Resolve. A blank version is resolvable only if exactly
+// one implementation version exists locally.
+func (r *Registry) Has(id, implementationVersion string) bool {
+	if r == nil {
+		return false
+	}
+	id = strings.TrimSpace(id)
+	implementationVersion = strings.TrimSpace(implementationVersion)
+	if id == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if implementationVersion != "" {
+		_, ok := r.entries[registryKey(id, implementationVersion)]
+		return ok
+	}
+	count := 0
+	for _, candidate := range r.entries {
+		if candidate.descriptor.ID == id {
+			count++
+			if count > 1 {
+				return false
+			}
+		}
+	}
+	return count == 1
 }
 
 // Resolve performs an exact implementation lookup. If implementationVersion is
