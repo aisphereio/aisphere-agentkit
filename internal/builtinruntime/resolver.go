@@ -1,6 +1,6 @@
-// Package builtinruntime adapts AgentKit's existing configurable tool
-// factories to Hub RuntimePlans. It keeps the factory registry as the single
-// implementation source for built-in tools.
+// Package builtinruntime adapts Runtime-owned builtin implementations to Hub
+// RuntimePlans. Builtin executable code is compiled into the Runtime binary;
+// Hub only selects a mirrored immutable descriptor/version.
 package builtinruntime
 
 import (
@@ -15,7 +15,8 @@ import (
 )
 
 type Resolver struct {
-	Config *runtimeconfig.Config
+	Config   *runtimeconfig.Config
+	Registry *Registry
 }
 
 func (r Resolver) ResolveTool(binding runtimeplan.ToolBinding) (tool.Tool, error) {
@@ -27,6 +28,18 @@ func (r Resolver) ResolveTool(binding runtimeplan.ToolBinding) (tool.Tool, error
 	if r.Config != nil {
 		ctx = runtimeconfig.WithConfig(ctx, r.Config)
 	}
+
+	// Tool V1: when a Runtime-owned registry is configured, the Hub binding is
+	// only a selector. No executable code is downloaded from Hub. Resolution is
+	// local and fails closed when the requested implementation is unavailable.
+	if r.Registry != nil {
+		resolved, _, err := r.Registry.Resolve(ctx, name, binding.ImplementationVersion, toolArgs(binding))
+		return resolved, err
+	}
+
+	// Transitional compatibility for the current AgentKit configurable factory
+	// registry. New production Builtins must be registered in Registry instead of
+	// adding more implicit configurable aliases here.
 	resolved, toolset, err := configurable.ResolveToolReference(ctx, name, toolArgs(binding))
 	if err != nil {
 		return nil, err
