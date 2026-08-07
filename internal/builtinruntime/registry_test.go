@@ -30,6 +30,12 @@ func TestRegistryResolvesExactBuiltinImplementation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
+	if !registry.Has("memory.search", "1") || !registry.Has("memory.search", "") {
+		t.Fatal("registered builtin should be available by exact and unique-version lookup")
+	}
+	if registry.Has("memory.search", "2") {
+		t.Fatal("unregistered implementation version must not be reported available")
+	}
 	resolved, got, err := registry.Resolve(context.Background(), "memory.search", "1", nil)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
@@ -67,6 +73,9 @@ func TestRegistryRequiresVersionWhenMultipleImplementationsExist(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("Register(%s) error = %v", version, err)
 		}
+	}
+	if registry.Has("knowledge.search", "") {
+		t.Fatal("blank implementation version must be ambiguous when multiple versions are registered")
 	}
 	_, _, err := registry.Resolve(context.Background(), "knowledge.search", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "exact version is required") {
