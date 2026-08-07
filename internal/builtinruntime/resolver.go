@@ -28,24 +28,40 @@ func (r Resolver) ResolveTool(binding runtimeplan.ToolBinding) (tool.Tool, error
 	if r.Config != nil {
 		ctx = runtimeconfig.WithConfig(ctx, r.Config)
 	}
+	implementationVersion := firstNonEmpty(
+		stringValue(binding.Runtime["implementationVersion"]),
+		stringValue(binding.Runtime["implementation_version"]),
+		stringValue(binding.Metadata["implementationVersion"]),
+		stringValue(binding.Metadata["implementation_version"]),
+	)
 
-	// Tool V1: when a Runtime-owned registry is configured, the Hub binding is
-	// only a selector. No executable code is downloaded from Hub. Resolution is
-	// local and fails closed when the requested implementation is unavailable.
-	if r.Registry != nil {
-		implementationVersion := firstNonEmpty(
-			stringValue(binding.Runtime["implementationVersion"]),
-			stringValue(binding.Runtime["implementation_version"]),
-			stringValue(binding.Metadata["implementationVersion"]),
-			stringValue(binding.Metadata["implementation_version"]),
-		)
-		resolved, _, err := r.Registry.Resolve(ctx, name, implementationVersion, toolArgs(binding))
+	registry := r.Registry
+	if registry == nil {
+		registry = DefaultRegistry()
+	}
+
+	// A V1 binding that pins an implementation version must resolve exactly from
+	// Runtime-local code. Missing code is a preparation failure; never downgrade
+	// to the legacy configurable registry or silently substitute another version.
+	if implementationVersion != "" {
+		if !registry.Has(name, implementationVersion) {
+			return nil, fmt.Errorf("builtin implementation %s@%s is not available in this Runtime", name, implementationVersion)
+		}
+		resolved, _, err := registry.Resolve(ctx, name, implementationVersion, toolArgs(binding))
 		return resolved, err
 	}
 
-	// Transitional compatibility for the current AgentKit configurable factory
-	// registry. New production Builtins must be registered in Registry instead of
-	// adding more implicit configurable aliases here.
+	// During migration, old Hub snapshots do not carry implementationVersion.
+	// If exactly one code-owned implementation exists, prefer it. Otherwise only
+	// pre-V1 bindings may fall through to the old configurable factory registry.
+	if registry.Has(name, "") {
+		resolved, _, err := registry.Resolve(ctx, name, "", toolArgs(binding))
+		return resolved, err
+	}
+
+	// Transitional compatibility for pre-V1 Agent/Tool snapshots. New production
+	// Builtins must be registered in DefaultRegistry instead of adding aliases to
+	// the configurable factory registry.
 	resolved, toolset, err := configurable.ResolveToolReference(ctx, name, toolArgs(binding))
 	if err != nil {
 		return nil, err
