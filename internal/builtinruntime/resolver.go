@@ -33,7 +33,13 @@ func (r Resolver) ResolveTool(binding runtimeplan.ToolBinding) (tool.Tool, error
 	// only a selector. No executable code is downloaded from Hub. Resolution is
 	// local and fails closed when the requested implementation is unavailable.
 	if r.Registry != nil {
-		resolved, _, err := r.Registry.Resolve(ctx, name, binding.ImplementationVersion, toolArgs(binding))
+		implementationVersion := firstNonEmpty(
+			stringValue(binding.Runtime["implementationVersion"]),
+			stringValue(binding.Runtime["implementation_version"]),
+			stringValue(binding.Metadata["implementationVersion"]),
+			stringValue(binding.Metadata["implementation_version"]),
+		)
+		resolved, _, err := r.Registry.Resolve(ctx, name, implementationVersion, toolArgs(binding))
 		return resolved, err
 	}
 
@@ -66,6 +72,11 @@ func toolArgs(binding runtimeplan.ToolBinding) map[string]any {
 		}
 	}
 	return args
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
 func firstNonEmpty(values ...string) string {
