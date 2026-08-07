@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package toolruntime
 
 import (
@@ -27,6 +41,32 @@ func TestRegistryResolvesPlanToolsByRuntimeType(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0].Name() != "workspace.read" {
 		t.Fatalf("unexpected tools: %+v", tools)
+	}
+}
+
+func TestLegacySandboxPlacementOverridesStaleBuiltinType(t *testing.T) {
+	registry := New()
+	if err := registry.Register(ConnectorBuiltin, ResolverFunc(func(binding runtimeplan.ToolBinding) (tool.Tool, error) {
+		return fakeTool{name: "builtin:" + binding.Name}, nil
+	})); err != nil {
+		t.Fatalf("Register(builtin) error = %v", err)
+	}
+	if err := registry.Register(ConnectorSandbox, ResolverFunc(func(binding runtimeplan.ToolBinding) (tool.Tool, error) {
+		return fakeTool{name: "sandbox:" + binding.Name}, nil
+	})); err != nil {
+		t.Fatalf("Register(sandbox) error = %v", err)
+	}
+
+	tools, err := registry.Resolve(&runtimeplan.RuntimePlan{Tools: []runtimeplan.ToolBinding{{
+		Name:        "workspace.read",
+		RuntimeType: "builtin",
+		Execution:   map[string]interface{}{"placement": "sandbox"},
+	}}})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name() != "sandbox:workspace.read" {
+		t.Fatalf("legacy sandbox placement resolved through wrong adapter: %+v", tools)
 	}
 }
 
