@@ -7,8 +7,12 @@
 - [SYSTEM-BOUNDARIES.md](SYSTEM-BOUNDARIES.md) — AISphere 跨组件职责边界、对象 Owner 与协作契约。
 - [MODULE-CATALOG.md](MODULE-CATALOG.md) — Hub / Runtime / Sandbox / IAM / Model Gateway 的模块功能清单、接口和架构债务台账。
 - [STORAGE-RETRIEVAL-RESERVATION.md](STORAGE-RETRIEVAL-RESERVATION.md) — Conversation / File / Memory / Retrieval 的逻辑位置与未来 OceanBase adapter 预留；当前不实现临时存储后端。
+- [TOOL-INVENTORY-V1.md](TOOL-INVENTORY-V1.md) — 当前 `configurable/tool/*` 能力逐项分类与迁移台账；Builtin V1 第一批实现及冲突 Tool 退役已进入代码阶段，下一批重分类前必须通过 Runtime Build/Test。
 - [ADR-001: AISphere Runtime 所有权与唯一 Agent Loop](ADR-001-runtime-ownership.md) — Runtime 只保留一套 ADK-Go Agent Loop。
 - [ADR-002: Runtime 执行事实模型](ADR-002-runtime-execution-facts.md) — `Run + ExecutionSnapshot + RunAttempt + RuntimeEvent` 唯一事实模型。
+- [ADR-003: Tool Contract 与统一 Invocation Pipeline V1](ADR-003-tool-contract-v1.md) — Tool V1 总体分层与统一执行链，目前为 Proposed，继续随代码校准。
+- [ADR-004: Builtin Tool V1](ADR-004-builtin-tools-v1.md) — Runtime code-first Builtin、Hub catalog mirror、Agent 显式选择及 V1 无独立 Builtin AuthZ 规则。
+- [ADR-005: Tool Connector Taxonomy V1](ADR-005-tool-connector-taxonomy-v1.md) — Accepted；Tool 语义 / source-discovery / execution connector 三轴分离，canonical connector 为 `builtin/service/sandbox/mcp/http`。
 
 ## 解释优先级
 
@@ -107,11 +111,11 @@ Redis resumable buffer 作为历史事实源
 
 ```text
 1. Runtime legacy 执行链收口
-2. Tool Compiler + Unified Invocation Pipeline
+2. Tool taxonomy + BuiltinRegistry + ToolCompiler + Unified Invocation Pipeline
 3. server-side ApprovalGrant + Credential Broker
 4. Hub immutable revision/version pinning
 5. Sandbox Tool Server / Lease contract
-6. MCP discovery/schema drift
+6. Service/MCP/HTTP adapter + discovery/schema drift
 7. Model Gateway integration
 8. Context Builder skeleton + Conversation/File/Memory/Retrieval ports
 9. OceanBase adapter / indexing / hybrid retrieval
