@@ -17,8 +17,11 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
@@ -27,7 +30,14 @@ import (
 	platformruns "google.golang.org/adk/internal/platform/runs"
 )
 
-// PlatformRunsAPIController exposes platform run lifecycle records.
+const (
+	runtimeEventPollInterval = 500 * time.Millisecond
+	runtimeEventHeartbeat    = 15 * time.Second
+)
+
+// PlatformRunsAPIController exposes the read model for Runtime execution facts.
+// Run, Snapshot, Attempt and Event mutations are deliberately kept inside the
+// Runtime execution engine and are not public management APIs.
 type PlatformRunsAPIController struct {
 	service platformruns.Service
 }
@@ -46,6 +56,8 @@ func (c *PlatformRunsAPIController) ListRunsHandler(rw http.ResponseWriter, req 
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	runs, err := c.service.ListRuns(req.Context(), platformruns.ListRunsFilter{
 		TenantID:  p.TenantID,
+		ProjectID: q.Get("project_id"),
+		AgentID:   q.Get("agent_id"),
 		AppName:   q.Get("app_name"),
 		UserID:    q.Get("user_id"),
 		SessionID: q.Get("session_id"),
@@ -57,48 +69,6 @@ func (c *PlatformRunsAPIController) ListRunsHandler(rw http.ResponseWriter, req 
 		return
 	}
 	EncodeJSONResponse(runs, http.StatusOK, rw)
-}
-
-func (c *PlatformRunsAPIController) CreateRunHandler(rw http.ResponseWriter, req *http.Request) {
-	if c.service == nil {
-		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
-		return
-	}
-	p := auth.FromContext(req.Context())
-	var body struct {
-		AppName      string `json:"app_name"`
-		UserID       string `json:"user_id"`
-		SessionID    string `json:"session_id"`
-		Status       string `json:"status"`
-		InputSummary string `json:"input_summary"`
-		ModelRef     string `json:"model_ref"`
-		MetadataJSON string `json:"metadata_json"`
-	}
-	if req.Body != nil {
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			http.Error(rw, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	userID := body.UserID
-	if userID == "" {
-		userID = p.UserID
-	}
-	run, err := c.service.CreateRun(req.Context(), platformruns.CreateRunRequest{
-		TenantID:     p.TenantID,
-		AppName:      body.AppName,
-		UserID:       userID,
-		SessionID:    body.SessionID,
-		Status:       body.Status,
-		InputSummary: body.InputSummary,
-		ModelRef:     body.ModelRef,
-		MetadataJSON: body.MetadataJSON,
-	})
-	if err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
-		return
-	}
-	EncodeJSONResponse(run, http.StatusCreated, rw)
 }
 
 func (c *PlatformRunsAPIController) GetRunHandler(rw http.ResponseWriter, req *http.Request) {
@@ -116,105 +86,192 @@ func (c *PlatformRunsAPIController) GetRunHandler(rw http.ResponseWriter, req *h
 	EncodeJSONResponse(run, http.StatusOK, rw)
 }
 
-func (c *PlatformRunsAPIController) UpdateRunHandler(rw http.ResponseWriter, req *http.Request) {
-	if c.service == nil {
-		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
-		return
-	}
-	p := auth.FromContext(req.Context())
-	id := mux.Vars(req)["run_id"]
-	var body struct {
-		Status       string  `json:"status"`
-		ErrorMessage string  `json:"error_message"`
-		MetadataJSON *string `json:"metadata_json"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
-		return
-	}
-	run, err := c.service.UpdateRun(req.Context(), p.TenantID, id, platformruns.UpdateRunRequest{
-		Status:       body.Status,
-		ErrorMessage: body.ErrorMessage,
-		MetadataJSON: body.MetadataJSON,
-	})
-	if err != nil {
-		writePlatformError(rw, err)
-		return
-	}
-	EncodeJSONResponse(run, http.StatusOK, rw)
-}
-
-func (c *PlatformRunsAPIController) ListStepsHandler(rw http.ResponseWriter, req *http.Request) {
+func (c *PlatformRunsAPIController) GetExecutionSnapshotHandler(rw http.ResponseWriter, req *http.Request) {
 	if c.service == nil {
 		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
 		return
 	}
 	p := auth.FromContext(req.Context())
 	runID := mux.Vars(req)["run_id"]
-	steps, err := c.service.ListSteps(req.Context(), p.TenantID, runID)
+	run, err := c.service.GetRun(req.Context(), p.TenantID, runID)
 	if err != nil {
 		writePlatformError(rw, err)
 		return
 	}
-	EncodeJSONResponse(steps, http.StatusOK, rw)
+	if run.SnapshotID == "" {
+		http.Error(rw, "execution snapshot not created", http.StatusNotFound)
+		return
+	}
+	snapshot, err := c.service.GetExecutionSnapshot(req.Context(), p.TenantID, run.SnapshotID)
+	if err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	EncodeJSONResponse(snapshot, http.StatusOK, rw)
 }
 
-func (c *PlatformRunsAPIController) CreateStepHandler(rw http.ResponseWriter, req *http.Request) {
+func (c *PlatformRunsAPIController) ListAttemptsHandler(rw http.ResponseWriter, req *http.Request) {
 	if c.service == nil {
 		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
 		return
 	}
 	p := auth.FromContext(req.Context())
 	runID := mux.Vars(req)["run_id"]
-	var body struct {
-		Kind        string `json:"kind"`
-		Status      string `json:"status"`
-		PayloadJSON string `json:"payload_json"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
-		return
-	}
-	step, err := c.service.CreateStep(req.Context(), platformruns.CreateStepRequest{
-		TenantID:    p.TenantID,
-		RunID:       runID,
-		Kind:        body.Kind,
-		Status:      body.Status,
-		PayloadJSON: body.PayloadJSON,
-	})
+	attempts, err := c.service.ListAttempts(req.Context(), p.TenantID, runID)
 	if err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
+		writePlatformError(rw, err)
 		return
 	}
-	EncodeJSONResponse(step, http.StatusCreated, rw)
+	EncodeJSONResponse(attempts, http.StatusOK, rw)
 }
 
-func (c *PlatformRunsAPIController) UpdateStepHandler(rw http.ResponseWriter, req *http.Request) {
+func (c *PlatformRunsAPIController) ListEventsHandler(rw http.ResponseWriter, req *http.Request) {
 	if c.service == nil {
 		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
 		return
 	}
 	p := auth.FromContext(req.Context())
-	stepID := mux.Vars(req)["step_id"]
-	var body struct {
-		Status       string  `json:"status"`
-		ErrorMessage string  `json:"error_message"`
-		PayloadJSON  *string `json:"payload_json"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+	runID := mux.Vars(req)["run_id"]
+	after, err := parseRuntimeEventCursor(req)
+	if err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return
 	}
-	step, err := c.service.UpdateStep(req.Context(), p.TenantID, stepID, platformruns.UpdateStepRequest{
-		Status:       body.Status,
-		ErrorMessage: body.ErrorMessage,
-		PayloadJSON:  body.PayloadJSON,
-	})
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	events, err := c.service.ListEvents(req.Context(), p.TenantID, runID, after, limit)
 	if err != nil {
 		writePlatformError(rw, err)
 		return
 	}
-	EncodeJSONResponse(step, http.StatusOK, rw)
+	EncodeJSONResponse(events, http.StatusOK, rw)
+}
+
+// StreamEventsHandler projects the durable RuntimeEvent ledger to SSE. The
+// RuntimeEvent sequence is the SSE id, allowing reconnect through either the
+// Last-Event-ID header or the after query parameter after process restarts.
+func (c *PlatformRunsAPIController) StreamEventsHandler(rw http.ResponseWriter, req *http.Request) {
+	if c.service == nil {
+		http.Error(rw, "platform run service is not enabled", http.StatusNotImplemented)
+		return
+	}
+	principal := auth.FromContext(req.Context())
+	runID := strings.TrimSpace(mux.Vars(req)["run_id"])
+	if runID == "" {
+		http.Error(rw, "run_id is required", http.StatusBadRequest)
+		return
+	}
+	if _, err := c.service.GetRun(req.Context(), principal.TenantID, runID); err != nil {
+		writePlatformError(rw, err)
+		return
+	}
+	cursor, err := parseRuntimeEventCursor(req)
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	setSSEHeaders(rw)
+	rw.Header().Set("X-AISphere-Run-ID", runID)
+	rw.Header().Set("X-Accel-Buffering", "no")
+	responseController := http.NewResponseController(rw)
+	if err := flushSSE(responseController, 0); err != nil {
+		return
+	}
+
+	pollTicker := time.NewTicker(runtimeEventPollInterval)
+	heartbeatTicker := time.NewTicker(runtimeEventHeartbeat)
+	defer pollTicker.Stop()
+	defer heartbeatTicker.Stop()
+
+	for {
+		terminal, nextCursor, err := c.flushRuntimeEventBatch(
+			req,
+			responseController,
+			rw,
+			principal.TenantID,
+			runID,
+			cursor,
+		)
+		if err != nil {
+			return
+		}
+		cursor = nextCursor
+		if terminal {
+			return
+		}
+
+		select {
+		case <-req.Context().Done():
+			return
+		case <-pollTicker.C:
+			continue
+		case <-heartbeatTicker.C:
+			if _, err := fmt.Fprint(rw, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			if err := flushSSE(responseController, 0); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *PlatformRunsAPIController) flushRuntimeEventBatch(
+	req *http.Request,
+	responseController *http.ResponseController,
+	rw http.ResponseWriter,
+	tenantID string,
+	runID string,
+	cursor uint64,
+) (bool, uint64, error) {
+	events, err := c.service.ListEvents(req.Context(), tenantID, runID, cursor, 200)
+	if err != nil {
+		return false, cursor, err
+	}
+	for _, runtimeEvent := range events {
+		encoded, err := json.Marshal(runtimeEvent)
+		if err != nil {
+			return false, cursor, err
+		}
+		if err := flashEventWithID(
+			responseController,
+			rw,
+			strconv.FormatUint(runtimeEvent.Sequence, 10),
+			string(encoded),
+			0,
+		); err != nil {
+			return false, cursor, err
+		}
+		cursor = runtimeEvent.Sequence
+		if isTerminalRuntimeEvent(runtimeEvent.EventType) {
+			return true, cursor, nil
+		}
+	}
+	return false, cursor, nil
+}
+
+func parseRuntimeEventCursor(req *http.Request) (uint64, error) {
+	raw := strings.TrimSpace(req.URL.Query().Get("after"))
+	if lastEventID := strings.TrimSpace(req.Header.Get("Last-Event-ID")); lastEventID != "" {
+		raw = lastEventID
+	}
+	if raw == "" {
+		return 0, nil
+	}
+	cursor, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid Runtime event cursor %q", raw)
+	}
+	return cursor, nil
+}
+
+func isTerminalRuntimeEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "run.completed", "run.failed", "run.cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func writePlatformError(rw http.ResponseWriter, err error) {

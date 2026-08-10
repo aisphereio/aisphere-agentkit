@@ -88,7 +88,6 @@ type Lease struct {
 	Driver          string                 `json:"driver,omitempty"`
 	Profile         string                 `json:"profile,omitempty"`
 	TemplateRef     string                 `json:"templateRef,omitempty"`
-	WorkerEndpoint  string                 `json:"workerEndpoint,omitempty"`
 	ToolsEndpoint   string                 `json:"toolsEndpoint,omitempty"`
 	BrowserEndpoint string                 `json:"browserEndpoint,omitempty"`
 	Endpoints       []Endpoint             `json:"endpoints,omitempty"`
@@ -130,10 +129,8 @@ func (c *Client) WaitReady(ctx context.Context, sandboxID string, interval time.
 		if err != nil {
 			return nil, err
 		}
-		if strings.EqualFold(lease.Phase, "ready") || strings.EqualFold(lease.Phase, "running") {
-			if lease.WorkerEndpoint != "" || lease.ToolsEndpoint != "" {
-				return lease, nil
-			}
+		if (strings.EqualFold(lease.Phase, "ready") || strings.EqualFold(lease.Phase, "running")) && lease.ToolsEndpoint != "" {
+			return lease, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -143,8 +140,9 @@ func (c *Client) WaitReady(ctx context.Context, sandboxID string, interval time.
 	}
 }
 
-// ListTools discovers the tools exposed by one sandbox. The returned schemas
-// are safe to pass to the model; the sandbox remains the only execution seam.
+// ListTools discovers the executor capabilities exposed by one sandbox.
+// These schemas are transitional until the Sandbox capability contract is
+// fully separated from Hub's model-facing Tool catalog.
 func (c *Client) ListTools(ctx context.Context, sandboxID string) (*ToolList, error) {
 	var out ToolList
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/sandboxes/"+sandboxID+"/tools", nil, &out); err != nil {
@@ -153,8 +151,9 @@ func (c *Client) ListTools(ctx context.Context, sandboxID string) (*ToolList, er
 	return &out, nil
 }
 
-// CallTool executes a tool through the sandbox adapter. Runtime callers must
-// pass an allowlisted tool name from the resolved Hub snapshot.
+// CallTool invokes one executor capability through the Sandbox adapter.
+// Business authorization, approval and credential policy belong to Runtime's
+// Tool Broker and must be completed before this call.
 func (c *Client) CallTool(ctx context.Context, sandboxID string, req ToolCallRequest) (*ToolCallResult, error) {
 	var out ToolCallResult
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/sandboxes/"+sandboxID+"/tools/call", req, &out); err != nil {
@@ -210,10 +209,6 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out interf
 func normalizeLease(l *Lease) {
 	for _, e := range l.Endpoints {
 		switch strings.ToLower(e.Name) {
-		case "worker", "session-worker":
-			if l.WorkerEndpoint == "" {
-				l.WorkerEndpoint = e.URL
-			}
 		case "tools", "tool", "tool-server":
 			if l.ToolsEndpoint == "" {
 				l.ToolsEndpoint = e.URL
