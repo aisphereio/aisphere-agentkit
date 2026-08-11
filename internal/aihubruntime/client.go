@@ -1,3 +1,17 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package aihubruntime synchronizes runtime-local skills from AIHub's
 // permission-aware Catalog API. AIHub is the single source of truth; Runtime
 // keeps immutable, checksum-verified execution caches and mounts a locked
@@ -310,20 +324,71 @@ type AgentResolveOptions struct {
 }
 
 type resolveAgentResponse struct {
-	SnapshotID    string             `json:"snapshotId"`
-	RuntimeID     string             `json:"runtimeId"`
-	SessionID     string             `json:"sessionId"`
-	AgentID       string             `json:"agentId"`
-	AgentVersion  string             `json:"agentVersion"`
-	AgentRevision string             `json:"agentRevision"`
-	GeneratedAt   string             `json:"generatedAt"`
-	Policy        string             `json:"policy"`
-	Definition    AgentDefinition    `json:"definition"`
-	Sandbox       SandboxSpec        `json:"sandbox,omitempty"`
-	Model         ModelSpec          `json:"model,omitempty"`
+	SnapshotID    string          `json:"snapshotId"`
+	RuntimeID     string          `json:"runtimeId"`
+	SessionID     string          `json:"sessionId"`
+	AgentID       string          `json:"agentId"`
+	AgentVersion  string          `json:"agentVersion"`
+	AgentRevision string          `json:"agentRevision"`
+	GeneratedAt   string          `json:"generatedAt"`
+	Policy        string          `json:"policy"`
+	Definition    AgentDefinition `json:"definition"`
+	Sandbox       SandboxSpec     `json:"sandbox,omitempty"`
+	// Model stays raw: Hub v1 serializes the model snapshot either as a flat
+	// ModelSpec or with a nested provider object. normalizeModelSpec handles
+	// both shapes.
+	Model         json.RawMessage    `json:"model,omitempty"`
 	Skills        []skillRef         `json:"skills"`
 	Tools         []ToolSnapshotItem `json:"tools,omitempty"`
 	Authorization map[string]any     `json:"authorization,omitempty"`
+}
+
+// normalizeModelSpec parses Hub's v1 model snapshot into a flat ModelSpec.
+// Accepted shapes:
+//   - {"profile":…, "model":"deepseek-...", "baseURL":…}          (flat)
+//   - {"profileId":…, "model":{"providerModelId":…}, "baseUrl":…} (nested)
+func normalizeModelSpec(raw json.RawMessage) (ModelSpec, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ModelSpec{}, nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ModelSpec{}, err
+	}
+	spec := ModelSpec{}
+	if v, ok := obj["profileId"].(string); ok {
+		spec.Profile = v
+	}
+	if v, ok := obj["profile"].(string); ok && spec.Profile == "" {
+		spec.Profile = v
+	}
+	if v, ok := obj["provider"].(string); ok {
+		spec.Provider = v
+	}
+	if v, ok := obj["baseUrl"].(string); ok {
+		spec.BaseURL = v
+	}
+	if v, ok := obj["apiFormat"].(string); ok {
+		spec.APIFormat = v
+	}
+	switch m := obj["model"].(type) {
+	case string:
+		spec.Model = m
+	case map[string]any:
+		if v, ok := m["providerModelId"].(string); ok {
+			spec.Model = v
+		} else if v, ok := m["name"].(string); ok {
+			spec.Model = v
+		} else if v, ok := m["id"].(string); ok {
+			spec.Model = v
+		}
+	}
+	if v, ok := obj["metadata"].(map[string]any); ok {
+		spec.Metadata = v
+	} else if v, ok := obj["defaultParameters"].(map[string]any); ok {
+		spec.Metadata = v
+	}
+	return spec, nil
 }
 
 func New(cfg runtimeconfig.AIHubSkillConfig) (*Client, error) {
@@ -474,7 +539,10 @@ func (c *Client) ResolveAgentSnapshotWithOptions(ctx context.Context, agentID, s
 	if sandbox.Profile == "" && response.Definition.Sandbox.Profile != "" {
 		sandbox = response.Definition.Sandbox
 	}
-	model := response.Model
+	model, err := normalizeModelSpec(response.Model)
+	if err != nil {
+		return nil, fmt.Errorf("parse model snapshot: %w", err)
+	}
 	if modelSpecEmpty(model) {
 		model = response.Definition.Model
 	}
