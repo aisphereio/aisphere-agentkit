@@ -412,7 +412,9 @@ func normalizeModelSpec(raw json.RawMessage) (ModelSpec, error) {
 			spec.APIFormat = v
 		}
 		if v, ok := endpoint["providerModelId"].(string); ok {
-			spec.Model = firstNonEmpty(spec.Model, v)
+			// endpoint.providerModelId is the authoritative connection name;
+			// it overrides the catalog's internal model UUID.
+			spec.Model = v
 		}
 		if v, ok := endpoint["credentialRef"].(string); ok {
 			if spec.Metadata == nil {
