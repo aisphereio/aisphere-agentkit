@@ -20,7 +20,11 @@ func TestFromSnapshotBuildsAuthorizedRuntimePlan(t *testing.T) {
 		},
 		Model:   aihubruntime.ModelSpec{Profile: "coding-default", Model: "glm-5.2"},
 		Sandbox: aihubruntime.SandboxSpec{Profile: "agent-default", NetworkMode: "restricted"},
-		Skills:  []aihubruntime.SkillSnapshotItem{{Name: "release-notes", Version: "builtin", Object: "aisphere://builtin-skills/release-notes"}},
+		Skills: []aihubruntime.SkillSnapshotItem{{
+			Name: "release-notes", Version: "v1.2.0", Source: "catalog", Object: "aihub:skill:release-notes",
+			CommitSHA: "commit-1", TreeSHA: "tree-1", ManifestSHA256: "manifest-1", ViaSkillSet: "release-workflow",
+			SHA256: "package-1", MD5: "package-md5", Size: 42, DownloadURL: "/signed/package",
+		}},
 		Tools: []aihubruntime.ToolSnapshotItem{{
 			Name: "workspace.read", Version: "v1", Revision: "tool-rev", Status: "active",
 			Runtime:     map[string]interface{}{"type": "sandbox"},
@@ -45,8 +49,12 @@ func TestFromSnapshotBuildsAuthorizedRuntimePlan(t *testing.T) {
 	if plan.Model.Profile != "coding-default" || plan.Model.Model != "glm-5.2" {
 		t.Fatalf("unexpected model spec: %+v", plan.Model)
 	}
-	if len(plan.Skills) != 1 || plan.Skills[0].Source != "builtin" {
+	if len(plan.Skills) != 1 || plan.Skills[0].Source != "catalog" {
 		t.Fatalf("unexpected skills: %+v", plan.Skills)
+	}
+	skill := plan.Skills[0]
+	if skill.CommitSHA != "commit-1" || skill.TreeSHA != "tree-1" || skill.ManifestSHA256 != "manifest-1" || skill.ViaSkillSet != "release-workflow" || skill.SHA256 != "package-1" || skill.MD5 != "package-md5" || skill.Size != 42 {
+		t.Fatalf("skill provenance was lost: %+v", skill)
 	}
 	if len(plan.Tools) != 1 || plan.Tools[0].ApprovalMode != "always" || !plan.Tools[0].Approved {
 		t.Fatalf("unexpected tools: %+v", plan.Tools)

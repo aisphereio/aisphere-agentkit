@@ -177,6 +177,10 @@ func (c *RuntimeAPIController) runNativeAgentGo(ctx context.Context, req models.
 			return nil, err
 		}
 		out = append(out, modelEvent)
+		if eventErr := runtimeexecutor.EventError(event); eventErr != nil {
+			facts.fail(ctx, service, runtimeexecutor.FailureCode(eventErr), eventErr)
+			return nil, eventErr
+		}
 	}
 	if err := facts.succeed(ctx, service); err != nil {
 		return nil, err
@@ -252,6 +256,11 @@ func (c *RuntimeAPIController) runNativeAgentGoSSE(
 			_ = flashErrorEvent(rc, rw, err, c.sseTimeout)
 			return
 		}
+		if eventErr := runtimeexecutor.EventError(event); eventErr != nil {
+			facts.fail(ctx, service, runtimeexecutor.FailureCode(eventErr), eventErr)
+			_ = flashErrorEvent(rc, rw, eventErr, c.sseTimeout)
+			return
+		}
 		data, err := json.Marshal(modelEvent)
 		if err != nil {
 			facts.fail(ctx, service, "EVENT_MARSHAL_FAILED", err)
@@ -269,8 +278,8 @@ func (c *RuntimeAPIController) runNativeAgentGoSSE(
 		return
 	}
 	done, _ := json.Marshal(map[string]any{
-		"adkRunDone": true,
-		"runId": facts.Run.ID,
+		"adkRunDone":    true,
+		"runId":         facts.Run.ID,
 		"runtimeEngine": "adk-go",
 	})
 	_ = flashEventWithID(rc, rw, "", string(done), c.sseTimeout)

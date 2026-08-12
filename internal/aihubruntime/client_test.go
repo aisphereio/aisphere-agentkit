@@ -162,6 +162,48 @@ func TestResolveAgentSnapshotFallsBackToKernelizedV1Hub(t *testing.T) {
 	}
 }
 
+func TestResolveAgentSnapshotPreservesSkillProvenance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v3/aihub/runtime/agents/research-agent/resolve" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"snapshotId":"v1-snap","agentId":"research-agent","agentVersion":"v1",
+			"definition":{"entryPoint":"root_agent.yaml","files":{"root_agent.yaml":"name: research-agent\n"}},
+			"skills":[{
+				"name":"release-notes","version":"v1.2.0","revision":"v1.2.0","source":"catalog",
+				"object":"aihub:skill:release-notes","commitSHA":"commit-1","treeSHA":"tree-1",
+				"manifestSHA256":"manifest-1","viaSkillSet":"release-workflow","sha256":"package-1",
+				"downloadUrl":"/v1/skills/release-notes/packages?ref=v1.2.0&sig=secret"
+			},{
+				"name":"sandbox-workspace-tools","version":"builtin-v1","source":"builtin",
+				"object":"aisphere://builtin-skills/sandbox-workspace-tools"
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(runtimeconfig.AIHubSkillConfig{Enabled: true, Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	snapshot, err := client.ResolveAgentSnapshot(context.Background(), "research-agent", "session-1")
+	if err != nil {
+		t.Fatalf("ResolveAgentSnapshot() error = %v", err)
+	}
+	if len(snapshot.Skills) != 2 {
+		t.Fatalf("skills = %+v", snapshot.Skills)
+	}
+	catalog := snapshot.Skills[0]
+	if catalog.CommitSHA != "commit-1" || catalog.TreeSHA != "tree-1" || catalog.ManifestSHA256 != "manifest-1" || catalog.ViaSkillSet != "release-workflow" || catalog.SHA256 != "package-1" {
+		t.Fatalf("catalog provenance was lost: %+v", catalog)
+	}
+	if got := snapshot.Skills[1].Object; got != "aisphere://builtin-skills/sandbox-workspace-tools" {
+		t.Fatalf("builtin object = %q", got)
+	}
+}
+
 func TestCookieForwardingIsLimitedToHubEndpoint(t *testing.T) {
 	client := &Client{cfg: runtimeconfig.AIHubSkillConfig{Endpoint: "https://hub.example.test"}}
 	ctx := WithCookieHeader(context.Background(), "aisphere_session=session-1")

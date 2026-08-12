@@ -48,3 +48,43 @@ func TestStripExecutionPlanAuthorization(t *testing.T) {
 		t.Fatalf("plan lost non-authorization fields: %s", cleaned)
 	}
 }
+
+func TestStripExecutionPlanAuthorizationRemovesEphemeralSkillDownloadURL(t *testing.T) {
+	planJSON := []byte(`{
+		"snapshotId": "abc123",
+		"skills": [{
+			"name": "rt-fn-1",
+			"version": "v1.0.0",
+			"object": "aihub:skill:rt-fn-1",
+			"commitSHA": "commit-1",
+			"treeSHA": "tree-1",
+			"manifestSHA256": "manifest-1",
+			"sha256": "package-1",
+			"downloadUrl": "/v1/skills/rt-fn-1/packages?ref=v1.0.0&exp=1&sig=secret"
+		}]
+	}`)
+	cleaned, err := stripExecutionPlanAuthorization(planJSON)
+	if err != nil {
+		t.Fatalf("stripExecutionPlanAuthorization: %v", err)
+	}
+	if string(cleaned) == string(planJSON) {
+		t.Fatal("execution plan was not sanitized")
+	}
+	var object struct {
+		Skills []map[string]any `json:"skills"`
+	}
+	if err := json.Unmarshal(cleaned, &object); err != nil {
+		t.Fatalf("unmarshal cleaned plan: %v", err)
+	}
+	if len(object.Skills) != 1 {
+		t.Fatalf("skills = %v", object.Skills)
+	}
+	if _, ok := object.Skills[0]["downloadUrl"]; ok {
+		t.Fatal("ephemeral downloadUrl was archived")
+	}
+	if object.Skills[0]["object"] != "aihub:skill:rt-fn-1" || object.Skills[0]["version"] != "v1.0.0" ||
+		object.Skills[0]["commitSHA"] != "commit-1" || object.Skills[0]["treeSHA"] != "tree-1" ||
+		object.Skills[0]["manifestSHA256"] != "manifest-1" || object.Skills[0]["sha256"] != "package-1" {
+		t.Fatalf("durable skill provenance was lost: %v", object.Skills[0])
+	}
+}

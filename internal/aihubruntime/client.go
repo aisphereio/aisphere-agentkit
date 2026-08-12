@@ -161,13 +161,19 @@ type catalogSkill struct {
 }
 
 type skillRef struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Revision    string `json:"revision,omitempty"`
-	SHA256      string `json:"sha256,omitempty"`
-	MD5         string `json:"md5,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	DownloadURL string `json:"downloadUrl"`
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	Revision       string `json:"revision,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Object         string `json:"object,omitempty"`
+	CommitSHA      string `json:"commitSHA,omitempty"`
+	TreeSHA        string `json:"treeSHA,omitempty"`
+	ManifestSHA256 string `json:"manifestSHA256,omitempty"`
+	ViaSkillSet    string `json:"viaSkillSet,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	MD5            string `json:"md5,omitempty"`
+	Size           int64  `json:"size,omitempty"`
+	DownloadURL    string `json:"downloadUrl"`
 }
 
 type catalogDownload struct {
@@ -263,16 +269,21 @@ type AgentListItem struct {
 }
 
 type SkillSnapshotItem struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Revision    string `json:"revision,omitempty"`
-	SHA256      string `json:"sha256,omitempty"`
-	MD5         string `json:"md5,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	DownloadURL string `json:"downloadUrl,omitempty"`
-	CachePath   string `json:"cachePath,omitempty"`
-	MountPath   string `json:"mountPath,omitempty"`
-	Object      string `json:"object,omitempty"`
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	Revision       string `json:"revision,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Object         string `json:"object,omitempty"`
+	CommitSHA      string `json:"commitSHA,omitempty"`
+	TreeSHA        string `json:"treeSHA,omitempty"`
+	ManifestSHA256 string `json:"manifestSHA256,omitempty"`
+	ViaSkillSet    string `json:"viaSkillSet,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	MD5            string `json:"md5,omitempty"`
+	Size           int64  `json:"size,omitempty"`
+	DownloadURL    string `json:"downloadUrl,omitempty"`
+	CachePath      string `json:"cachePath,omitempty"`
+	MountPath      string `json:"mountPath,omitempty"`
 }
 
 type resolveSessionRequest struct {
@@ -595,7 +606,13 @@ func (c *Client) ResolveAgentSnapshotWithOptions(ctx context.Context, agentID, s
 	}
 	items := make([]SkillSnapshotItem, 0, len(response.Skills))
 	for _, ref := range response.Skills {
-		items = append(items, SkillSnapshotItem{Name: ref.Name, Version: ref.Version, Revision: ref.Revision, SHA256: ref.SHA256, MD5: ref.MD5, Size: ref.Size, DownloadURL: ref.DownloadURL, Object: "aihub:skill:" + ref.Name})
+		items = append(items, SkillSnapshotItem{
+			Name: ref.Name, Version: ref.Version, Revision: ref.Revision,
+			Source: ref.Source, Object: firstNonEmpty(ref.Object, "aihub:skill:"+ref.Name),
+			CommitSHA: ref.CommitSHA, TreeSHA: ref.TreeSHA, ManifestSHA256: ref.ManifestSHA256,
+			ViaSkillSet: ref.ViaSkillSet, SHA256: ref.SHA256, MD5: ref.MD5, Size: ref.Size,
+			DownloadURL: ref.DownloadURL,
+		})
 	}
 	sandbox := response.Sandbox
 	if sandbox.Profile == "" && response.Definition.Sandbox.Profile != "" {
@@ -845,7 +862,13 @@ func (c *Client) snapshotFromRefs(skillset, revision, snapshotID, generatedAt, s
 	skills := make([]SkillSnapshotItem, 0, len(refs))
 	for _, ref := range refs {
 		version := firstNonEmpty(ref.Version, "latest")
-		item := SkillSnapshotItem{Name: ref.Name, Version: version, Revision: ref.Revision, SHA256: ref.SHA256, MD5: ref.MD5, Size: ref.Size, DownloadURL: ref.DownloadURL, MountPath: filepath.ToSlash(filepath.Join(ref.Name)), Object: "aihub:skill:" + ref.Name}
+		item := SkillSnapshotItem{
+			Name: ref.Name, Version: version, Revision: ref.Revision,
+			Source: ref.Source, Object: firstNonEmpty(ref.Object, "aihub:skill:"+ref.Name),
+			CommitSHA: ref.CommitSHA, TreeSHA: ref.TreeSHA, ManifestSHA256: ref.ManifestSHA256,
+			ViaSkillSet: ref.ViaSkillSet, SHA256: ref.SHA256, MD5: ref.MD5, Size: ref.Size,
+			DownloadURL: ref.DownloadURL, MountPath: filepath.ToSlash(filepath.Join(ref.Name)),
+		}
 		skills = append(skills, item)
 	}
 	return &SkillSnapshot{SnapshotID: snapshotID, RuntimeID: c.runtimeID(), SessionID: sessionID, SkillSet: skillset, Revision: revision, GeneratedAt: generatedAt, Policy: policy, Skills: skills}

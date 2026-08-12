@@ -61,6 +61,22 @@ func stripExecutionPlanAuthorization(planJSON []byte) ([]byte, error) {
 		return nil, fmt.Errorf("parse execution plan for ledger: %w", err)
 	}
 	delete(object, "authorization")
+	if rawSkills := object["skills"]; len(rawSkills) > 0 {
+		var skills []map[string]any
+		if err := json.Unmarshal(rawSkills, &skills); err != nil {
+			return nil, fmt.Errorf("parse execution plan skills for ledger: %w", err)
+		}
+		for _, skill := range skills {
+			// Signed package URLs are short-lived bearer capabilities. Durable
+			// audit provenance is name/version/object plus content digests.
+			delete(skill, "downloadUrl")
+		}
+		cleanedSkills, err := json.Marshal(skills)
+		if err != nil {
+			return nil, fmt.Errorf("encode sanitized execution plan skills: %w", err)
+		}
+		object["skills"] = cleanedSkills
+	}
 	return json.Marshal(object)
 }
 
@@ -128,8 +144,8 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 	sourceSpecDigest := platformruns.SnapshotDigest(canonicalPlan)
 
 	snapshotEnvelope := map[string]any{
-		"schemaVersion":   platformruns.ExecutionSnapshotSchemaV1,
-		"sourceSpec":      json.RawMessage(canonicalPlan),
+		"schemaVersion":    platformruns.ExecutionSnapshotSchemaV1,
+		"sourceSpec":       json.RawMessage(canonicalPlan),
 		"sourceSpecDigest": sourceSpecDigest,
 		"principal": map[string]any{
 			"tenantId":    tenantID,
@@ -212,8 +228,8 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 		TraceID:  invocationID,
 	}
 	if _, err := facts.append(ctx, service, "run.created", map[string]any{
-		"runId":         run.ID,
-		"snapshotId":    snapshot.ID,
+		"runId":          run.ID,
+		"snapshotId":     snapshot.ID,
 		"snapshotDigest": snapshot.SnapshotDigest,
 	}); err != nil {
 		facts.fail(ctx, service, "EVENT_LEDGER_FAILED", err)
@@ -242,7 +258,7 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 		return nil, err
 	}
 	if _, err := facts.append(ctx, service, "attempt.started", map[string]any{
-		"attemptId":    attempt.ID,
+		"attemptId":     attempt.ID,
 		"runtimeEngine": "adk-go",
 	}); err != nil {
 		facts.fail(ctx, service, "EVENT_LEDGER_FAILED", err)

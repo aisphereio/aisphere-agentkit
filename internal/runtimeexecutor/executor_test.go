@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"google.golang.org/genai"
@@ -11,10 +13,12 @@ import (
 	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/internal/sandboxclient"
 	"google.golang.org/adk/internal/sandboxruntime"
+	"google.golang.org/adk/internal/skillruntime"
 	"google.golang.org/adk/internal/testutil"
 	"google.golang.org/adk/internal/toolruntime"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/session"
+	"google.golang.org/adk/tool"
 )
 
 type fakeModel struct{}
@@ -110,5 +114,106 @@ func TestExecutorRunsModelToolLoopThroughSandboxAndPermissionGate(t *testing.T) 
 	}
 	if !sawToolResponse || !sawFinalText {
 		t.Fatalf("tool loop events missing: toolResponse=%v finalText=%v", sawToolResponse, sawFinalText)
+	}
+}
+
+func TestExecutorLoadsAuthorizedSkillThroughPermissionGate(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "release-notes")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: release-notes\ndescription: Summarize a release\n---\nFollow the release checklist."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bindings := []runtimeplan.SkillBinding{{Name: "release-notes", Version: "v1.2.0"}}
+	set, err := skillruntime.NewToolset(t.Context(), root, bindings)
+	if err != nil {
+		t.Fatalf("NewToolset() error = %v", err)
+	}
+	model := &testutil.MockModel{Responses: []*genai.Content{
+		genai.NewContentFromFunctionCall("load_skill", map[string]any{"name": "release-notes"}, genai.RoleModel),
+		genai.NewContentFromText("skill-context-loaded", genai.RoleModel),
+	}}
+	executor := &Executor{
+		Model: model, SessionService: session.InMemoryService(), Toolsets: []tool.Toolset{set}, AutoCreateSession: true,
+	}
+	plan := &runtimeplan.RuntimePlan{
+		SnapshotID: "snap-skill-loop",
+		Agent:      runtimeplan.AgentSpec{ID: "agent-1", Name: "skill_agent", Instruction: "Load the authorized Skill."},
+		Skills:     bindings,
+	}
+	var sawSkillResponse, sawFinalText bool
+	for event, runErr := range executor.Run(t.Context(), RunRequest{
+		Plan: plan, AppName: "agent-1", UserID: "user-1", SessionID: "session-1", Message: "summarize the release",
+	}) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		if eventErr := EventError(event); eventErr != nil {
+			t.Fatalf("EventError() = %v", eventErr)
+		}
+		if event == nil || event.LLMResponse.Content == nil {
+			continue
+		}
+		for _, part := range event.LLMResponse.Content.Parts {
+			if part == nil {
+				continue
+			}
+			if part.FunctionResponse != nil && part.FunctionResponse.Name == "load_skill" {
+				sawSkillResponse = true
+				if got := fmt.Sprint(part.FunctionResponse.Response["instructions"]); got != "Follow the release checklist." {
+					t.Fatalf("instructions = %q", got)
+				}
+			}
+			if part.Text == "skill-context-loaded" {
+				sawFinalText = true
+			}
+		}
+	}
+	if !sawSkillResponse || !sawFinalText {
+		t.Fatalf("skill tool loop events missing: toolResponse=%v finalText=%v", sawSkillResponse, sawFinalText)
+	}
+}
+
+func TestRuntimeExecutionErrorDetectsDeniedToolAndSkillLoadFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		response map[string]any
+	}{
+		{
+			name:     "permission gate denial",
+			toolName: "workspace.write",
+			response: map[string]any{"error": "tool is not allowed by runtime plan: workspace.write"},
+		},
+		{
+			name:     "skill load failure",
+			toolName: "load_skill",
+			response: map[string]any{"error": "load instructions for skill release-notes: file missing"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			event := &session.Event{LLMResponse: model.LLMResponse{Content: &genai.Content{
+				Role:  genai.RoleUser,
+				Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: tc.toolName, Response: tc.response}}},
+			}}}
+			if err := EventError(event); err == nil {
+				t.Fatal("EventError() = nil, want failure")
+			}
+		})
+	}
+}
+
+func TestRuntimeExecutionErrorAllowsSuccessfulSkillLoad(t *testing.T) {
+	event := &session.Event{LLMResponse: model.LLMResponse{Content: &genai.Content{
+		Role: genai.RoleUser,
+		Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{
+			Name: "load_skill", Response: map[string]any{"instructions": "Follow the release checklist."},
+		}}},
+	}}}
+	if err := EventError(event); err != nil {
+		t.Fatalf("EventError() = %v, want nil", err)
 	}
 }

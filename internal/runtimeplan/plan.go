@@ -43,14 +43,21 @@ type ModelSpec = aihubruntime.ModelSpec
 type SandboxSpec = aihubruntime.SandboxSpec
 
 type SkillBinding struct {
-	Name        string `json:"name"`
-	Version     string `json:"version,omitempty"`
-	Revision    string `json:"revision,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Object      string `json:"object,omitempty"`
-	DownloadURL string `json:"downloadUrl,omitempty"`
-	CachePath   string `json:"cachePath,omitempty"`
-	MountPath   string `json:"mountPath,omitempty"`
+	Name           string `json:"name"`
+	Version        string `json:"version,omitempty"`
+	Revision       string `json:"revision,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Object         string `json:"object,omitempty"`
+	CommitSHA      string `json:"commitSHA,omitempty"`
+	TreeSHA        string `json:"treeSHA,omitempty"`
+	ManifestSHA256 string `json:"manifestSHA256,omitempty"`
+	ViaSkillSet    string `json:"viaSkillSet,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	MD5            string `json:"md5,omitempty"`
+	Size           int64  `json:"size,omitempty"`
+	DownloadURL    string `json:"downloadUrl,omitempty"`
+	CachePath      string `json:"cachePath,omitempty"`
+	MountPath      string `json:"mountPath,omitempty"`
 }
 
 type ToolBinding struct {
@@ -195,9 +202,11 @@ func convertSkills(items []aihubruntime.SkillSnapshotItem) []SkillBinding {
 		}
 		out = append(out, SkillBinding{
 			Name: name, Version: item.Version, Revision: item.Revision,
-			Object: item.Object, DownloadURL: item.DownloadURL,
+			Object: item.Object, CommitSHA: item.CommitSHA, TreeSHA: item.TreeSHA,
+			ManifestSHA256: item.ManifestSHA256, ViaSkillSet: item.ViaSkillSet,
+			SHA256: item.SHA256, MD5: item.MD5, Size: item.Size, DownloadURL: item.DownloadURL,
 			CachePath: item.CachePath, MountPath: item.MountPath,
-			Source: sourceFromSkill(item),
+			Source: firstNonEmpty(item.Source, sourceFromSkill(item)),
 		})
 	}
 	return out

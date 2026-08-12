@@ -3,6 +3,7 @@ package runtimeexecutor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/internal/agentassembler"
+	"google.golang.org/adk/internal/permissiongate"
 	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/internal/toolruntime"
 	"google.golang.org/adk/model"
@@ -18,6 +20,73 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 )
+
+var ErrSkillContextToolFailed = errors.New("skill context tool failed")
+
+// EventError turns non-transport failures embedded in ADK events into Runtime
+// execution failures. ADK intentionally feeds function errors back to the LLM,
+// but the Runtime ledger must not mark a run successful when authorization was
+// denied or a Skill context reader failed.
+func EventError(event *session.Event) error {
+	if event == nil {
+		return nil
+	}
+	if code := strings.TrimSpace(event.LLMResponse.ErrorCode); code != "" {
+		return fmt.Errorf("model event failed [%s]: %s", code, strings.TrimSpace(event.LLMResponse.ErrorMessage))
+	}
+	if message := strings.TrimSpace(event.LLMResponse.ErrorMessage); message != "" {
+		return fmt.Errorf("model event failed: %s", message)
+	}
+	if event.LLMResponse.Content == nil {
+		return nil
+	}
+	for _, part := range event.LLMResponse.Content.Parts {
+		if part == nil || part.FunctionResponse == nil {
+			continue
+		}
+		responseError := responseErrorMessage(part.FunctionResponse.Response)
+		if responseError == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(responseError), permissiongate.ErrToolDenied.Error()) {
+			return fmt.Errorf("%w: %s", permissiongate.ErrToolDenied, responseError)
+		}
+		switch strings.TrimSpace(part.FunctionResponse.Name) {
+		case "list_skills", "load_skill", "load_skill_resource":
+			return fmt.Errorf("%w: %s: %s", ErrSkillContextToolFailed, part.FunctionResponse.Name, responseError)
+		}
+	}
+	return nil
+}
+
+func responseErrorMessage(response map[string]any) string {
+	if response == nil {
+		return ""
+	}
+	for _, key := range []string{"error", "errorMessage"} {
+		if value, ok := response[key]; ok && value != nil {
+			message := strings.TrimSpace(fmt.Sprint(value))
+			if message != "" && message != "<nil>" {
+				return message
+			}
+		}
+	}
+	if output, ok := response["output"].(map[string]any); ok {
+		return responseErrorMessage(output)
+	}
+	return ""
+}
+
+func FailureCode(err error) string {
+	switch {
+	case errors.Is(err, permissiongate.ErrToolDenied):
+		return "TOOL_AUTHORIZATION_DENIED"
+	case errors.Is(err, ErrSkillContextToolFailed):
+		return "SKILL_CONTEXT_TOOL_FAILED"
+	default:
+		return "AGENT_RUN_FAILED"
+	}
+}
 
 type Executor struct {
 	Model             model.LLM

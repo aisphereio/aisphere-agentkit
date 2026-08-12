@@ -28,6 +28,12 @@ type Decision struct {
 	Reason           string
 }
 
+var skillContextToolNames = []string{
+	"list_skills",
+	"load_skill",
+	"load_skill_resource",
+}
+
 func New(plan *runtimeplan.RuntimePlan) *Gate {
 	g := &Gate{tools: map[string]runtimeplan.ToolBinding{}}
 	if plan == nil {
@@ -46,6 +52,20 @@ func New(plan *runtimeplan.RuntimePlan) *Gate {
 				if alias = strings.TrimSpace(alias); alias != "" {
 					g.tools[alias] = item
 				}
+			}
+		}
+	}
+	// Skill context tools are Runtime-owned readers over the exact Skill
+	// snapshot already authorized and materialized for this run. They are not
+	// Hub Tool grants and must never be derived from SKILL.md allowed-tools.
+	// Expose them only when the immutable RuntimePlan actually contains at
+	// least one Skill; a plan without Skills continues to fail closed.
+	if len(plan.Skills) > 0 {
+		for _, name := range skillContextToolNames {
+			g.tools[name] = runtimeplan.ToolBinding{
+				Name: name, Status: "active", RuntimeType: "skill-context",
+				ApprovalMode: "always", Approved: true,
+				Metadata: map[string]interface{}{"authorizedBy": "runtime-plan.skills"},
 			}
 		}
 	}
