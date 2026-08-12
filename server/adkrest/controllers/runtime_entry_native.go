@@ -35,10 +35,10 @@ func (c *RuntimeAPIController) RunNativeOnlyHandler(rw http.ResponseWriter, req 
 	if err := c.validateRunInputPolicy(runReq); err != nil {
 		return err
 	}
-	ctx := aihubruntime.WithRequestHeaders(
+	ctx := c.runtimeContext(aihubruntime.WithRequestHeaders(
 		aihubruntime.WithCookieHeader(req.Context(), req.Header.Get("Cookie")),
 		req.Header,
-	)
+	))
 	events, err := c.runNativeAgent(ctx, runReq)
 	if err != nil {
 		return err
