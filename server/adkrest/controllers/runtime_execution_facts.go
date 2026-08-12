@@ -48,6 +48,22 @@ func (c *RuntimeAPIController) SetExecutionFactService(service platformruns.Serv
 	runtimeExecutionFactServices.Store(c, service)
 }
 
+// stripExecutionPlanAuthorization removes the runtime-only authorization
+// subtree from a serialized Hub execution plan before it is archived as the
+// source spec. The subtree (principalSubject, tool approval decisions) is
+// execution context, not immutable source; its key name would otherwise trip
+// the credential scanner because "authorization" also names the value of an
+// HTTP Authorization header. The in-memory RuntimePlan keeps the subtree for
+// enforcement — only the archived copy is pruned.
+func stripExecutionPlanAuthorization(planJSON []byte) ([]byte, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(planJSON, &object); err != nil {
+		return nil, fmt.Errorf("parse execution plan for ledger: %w", err)
+	}
+	delete(object, "authorization")
+	return json.Marshal(object)
+}
+
 func (c *RuntimeAPIController) executionFactService() platformruns.Service {
 	if c == nil {
 		return nil
@@ -95,6 +111,15 @@ func (c *RuntimeAPIController) beginNativeExecutionFacts(
 	planJSON, err := json.Marshal(lease.Plan)
 	if err != nil {
 		return nil, fmt.Errorf("marshal resolved Hub execution plan: %w", err)
+	}
+	// The authorization subtree is runtime execution context (principal
+	// derivation, tool approvals), not part of the immutable source spec, and
+	// its key name collides with the ledger's credential scanner (an
+	// Authorization header value is a credential). Strip it before archiving;
+	// the in-memory plan keeps it for authorization enforcement.
+	planJSON, err = stripExecutionPlanAuthorization(planJSON)
+	if err != nil {
+		return nil, err
 	}
 	canonicalPlan, err := platformruns.CanonicalizeSnapshotJSON(planJSON)
 	if err != nil {
