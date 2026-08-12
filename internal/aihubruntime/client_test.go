@@ -42,6 +42,54 @@ func TestSnapshotFromRefsPreservesDownloadURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelSpecResourceV2(t *testing.T) {
+	raw := json.RawMessage(`{
+		"model": {"id": "m-1", "code": "deepseek-v4", "family": "deepseek-v4", "vendor": "deepseek"},
+		"profile": {"id": "p-1", "code": "deepseek-profile", "limits": {"contextWindow": 1000000}},
+		"endpoint": {
+			"id": "e-1",
+			"adapter": "openai_compatible",
+			"apiPath": "/v1/chat/completions",
+			"baseUrl": "https://api.deepseek.com",
+			"apiFormat": "chat_completions",
+			"credentialRef": "sk-test",
+			"providerModelId": "deepseek-v4-flash"
+		}
+	}`)
+	spec, err := normalizeModelSpec(raw)
+	if err != nil {
+		t.Fatalf("normalizeModelSpec() error = %v", err)
+	}
+	if spec.Profile != "deepseek-profile" {
+		t.Fatalf("Profile = %q, want deepseek-profile", spec.Profile)
+	}
+	if spec.Model != "deepseek-v4-flash" {
+		t.Fatalf("Model = %q, want deepseek-v4-flash", spec.Model)
+	}
+	if spec.Provider != "openai_compatible" {
+		t.Fatalf("Provider = %q, want openai_compatible", spec.Provider)
+	}
+	if spec.BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("BaseURL = %q", spec.BaseURL)
+	}
+	if spec.APIFormat != "chat_completions" {
+		t.Fatalf("APIFormat = %q", spec.APIFormat)
+	}
+	if got := spec.Metadata["credentialRef"]; got != "sk-test" {
+		t.Fatalf("credentialRef metadata = %v", got)
+	}
+}
+
+func TestNormalizeModelSpecFlatShape(t *testing.T) {
+	spec, err := normalizeModelSpec(json.RawMessage(`{"profile":"coding-default","model":"glm-5.2","provider":"openai","baseURL":"https://api.example.com/v1"}`))
+	if err != nil {
+		t.Fatalf("normalizeModelSpec() error = %v", err)
+	}
+	if spec.Profile != "coding-default" || spec.Model != "glm-5.2" || spec.BaseURL != "https://api.example.com/v1" {
+		t.Fatalf("unexpected flat spec: %+v", spec)
+	}
+}
+
 func TestResolveAgentSnapshotForwardsSessionCookie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Cookie"); got != "aisphere_session=session-1" {

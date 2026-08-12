@@ -343,10 +343,16 @@ type resolveAgentResponse struct {
 	Authorization map[string]any     `json:"authorization,omitempty"`
 }
 
-// normalizeModelSpec parses Hub's v1 model snapshot into a flat ModelSpec.
+// normalizeModelSpec parses Hub's model snapshot into a flat ModelSpec.
 // Accepted shapes:
-//   - {"profile":…, "model":"deepseek-...", "baseURL":…}          (flat)
-//   - {"profileId":…, "model":{"providerModelId":…}, "baseUrl":…} (nested)
+//   - {"profile":…, "model":"deepseek-...", "baseURL":…, "provider":…}          (flat)
+//   - {"profileId":…, "model":{"providerModelId":…}, "baseUrl":…}               (nested endpoint)
+//   - {"model":{…}, "profile":{…}, "endpoint":{…}, "reasoning":{…}}             (resource v2)
+//
+// The resource-v2 shape keeps connection details under "endpoint": base_url,
+// adapter (provider), api_format and provider_model_id; "credential_ref" is
+// forwarded through metadata so the resolver can surface the API key without
+// the token ever entering the executed plan's authorization tree.
 func normalizeModelSpec(raw json.RawMessage) (ModelSpec, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ModelSpec{}, nil
@@ -359,13 +365,20 @@ func normalizeModelSpec(raw json.RawMessage) (ModelSpec, error) {
 	if v, ok := obj["profileId"].(string); ok {
 		spec.Profile = v
 	}
-	if v, ok := obj["profile"].(string); ok && spec.Profile == "" {
+	if v, ok := obj["profile"].(map[string]any); ok {
+		if code, ok := v["code"].(string); ok {
+			spec.Profile = firstNonEmpty(spec.Profile, code)
+		}
+	} else if v, ok := obj["profile"].(string); ok && spec.Profile == "" {
 		spec.Profile = v
 	}
 	if v, ok := obj["provider"].(string); ok {
 		spec.Provider = v
 	}
 	if v, ok := obj["baseUrl"].(string); ok {
+		spec.BaseURL = v
+	}
+	if v, ok := obj["baseURL"].(string); ok && spec.BaseURL == "" {
 		spec.BaseURL = v
 	}
 	if v, ok := obj["apiFormat"].(string); ok {
@@ -381,12 +394,59 @@ func normalizeModelSpec(raw json.RawMessage) (ModelSpec, error) {
 			spec.Model = v
 		} else if v, ok := m["id"].(string); ok {
 			spec.Model = v
+		} else if v, ok := m["code"].(string); ok {
+			spec.Model = v
+		}
+	}
+	// Resource v2: endpoint carries the connection contract.
+	if endpoint, ok := obj["endpoint"].(map[string]any); ok {
+		if v, ok := endpoint["baseUrl"].(string); ok {
+			spec.BaseURL = v
+		}
+		if v, ok := endpoint["adapter"].(string); ok {
+			spec.Provider = v
+		} else if v, ok := endpoint["apiFormat"].(string); ok {
+			spec.Provider = firstNonEmpty(spec.Provider, v)
+		}
+		if v, ok := endpoint["apiFormat"].(string); ok {
+			spec.APIFormat = v
+		}
+		if v, ok := endpoint["providerModelId"].(string); ok {
+			spec.Model = firstNonEmpty(spec.Model, v)
+		}
+		if v, ok := endpoint["credentialRef"].(string); ok {
+			if spec.Metadata == nil {
+				spec.Metadata = map[string]any{}
+			}
+			spec.Metadata["credentialRef"] = v
+		}
+		if v, ok := endpoint["requestDefaults"].(map[string]any); ok {
+			if spec.Metadata == nil {
+				spec.Metadata = map[string]any{}
+			}
+			for key, value := range v {
+				if _, exists := spec.Metadata[key]; !exists {
+					spec.Metadata[key] = value
+				}
+			}
 		}
 	}
 	if v, ok := obj["metadata"].(map[string]any); ok {
-		spec.Metadata = v
+		if spec.Metadata == nil {
+			spec.Metadata = map[string]any{}
+		}
+		for key, value := range v {
+			if _, exists := spec.Metadata[key]; !exists {
+				spec.Metadata[key] = value
+			}
+		}
 	} else if v, ok := obj["defaultParameters"].(map[string]any); ok {
-		spec.Metadata = v
+		if spec.Metadata == nil {
+			spec.Metadata = map[string]any{}
+		}
+		for key, value := range v {
+			spec.Metadata[key] = value
+		}
 	}
 	return spec, nil
 }

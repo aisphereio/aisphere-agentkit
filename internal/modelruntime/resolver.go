@@ -67,6 +67,11 @@ func modelSpecFromHub(spec runtimeplan.ModelSpec) (string, runtimeconfig.ModelSp
 	if value := metadataString(spec.Metadata, "apiKey"); value != "" {
 		out.APIKey = value
 	}
+	if value := metadataString(spec.Metadata, "credentialRef"); value != "" && out.APIKey == "" {
+		// Hub resource-v2 snapshots carry the concrete credential under
+		// credential_ref; surface it as the API key for the adapter.
+		out.APIKey = value
+	}
 	if value := metadataString(spec.Metadata, "timeout"); value != "" {
 		out.Timeout = value
 	}
