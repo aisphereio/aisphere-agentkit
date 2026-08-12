@@ -44,6 +44,8 @@ func New(plan *runtimeplan.RuntimePlan) *Gate {
 		if name != "" {
 			g.tools[name] = item
 			for _, alias := range []string{
+				runtimeplan.ModelSafeToolName(item.RuntimeName),
+				runtimeplan.ModelSafeToolName(name),
 				item.RuntimeName,
 				stringFromMap(item.Runtime, "name"),
 				stringFromMap(item.Execution, "name"),

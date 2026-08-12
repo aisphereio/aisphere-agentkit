@@ -108,3 +108,16 @@ func TestFromSnapshotNormalizesLegacyGoMarshaledToolDefinition(t *testing.T) {
 		t.Fatalf("capabilities = %+v", got.Capabilities)
 	}
 }
+
+func TestModelSafeToolNameAdaptsCatalogNamespace(t *testing.T) {
+	tests := map[string]string{
+		"workspace.write": "workspace_write_8ea1c313",
+		"load_skill":      "load_skill",
+		"skill/pull":      "skill_pull_7a0ca7fa",
+	}
+	for input, want := range tests {
+		if got := ModelSafeToolName(input); got != want {
+			t.Fatalf("ModelSafeToolName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

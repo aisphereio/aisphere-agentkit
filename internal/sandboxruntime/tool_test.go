@@ -51,6 +51,9 @@ func TestResolverCreatesExecutableSandboxTool(t *testing.T) {
 	if got := fn.Declaration().Description; got != "Read a workspace file" {
 		t.Fatalf("description = %q", got)
 	}
+	if got := fn.Declaration().Name; got != "workspace_read_7719d3f4" {
+		t.Fatalf("model Tool name = %q, want workspace_read_7719d3f4", got)
+	}
 	out, err := fn.Run(nil, map[string]any{"path": "README.md"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -91,6 +94,9 @@ func TestSandboxToolSeparatesModelNameFromExecutorCapability(t *testing.T) {
 	}
 	if got := caller.req.Metadata["modelToolName"]; got != "skill_pull" {
 		t.Fatalf("metadata modelToolName = %#v", got)
+	}
+	if got := caller.req.Metadata["canonicalToolName"]; got != "skill.pull" {
+		t.Fatalf("metadata canonicalToolName = %#v", got)
 	}
 	if got := caller.req.Metadata["executorCapability"]; got != "git.fetch" {
 		t.Fatalf("metadata executorCapability = %#v", got)

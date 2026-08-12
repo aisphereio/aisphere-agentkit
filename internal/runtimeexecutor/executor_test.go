@@ -78,7 +78,7 @@ func TestExecutorRunsModelToolLoopThroughSandboxAndPermissionGate(t *testing.T) 
 		t.Fatalf("register sandbox resolver: %v", err)
 	}
 	model := &testutil.MockModel{Responses: []*genai.Content{
-		genai.NewContentFromFunctionCall("workspace.read", map[string]any{"path": "README.md"}, genai.RoleModel),
+		genai.NewContentFromFunctionCall("workspace_read_7719d3f4", map[string]any{"path": "README.md"}, genai.RoleModel),
 		genai.NewContentFromText("closed-loop-complete", genai.RoleModel),
 	}}
 	executor := &Executor{Model: model, SessionService: session.InMemoryService(), ToolRegistry: registry, AutoCreateSession: true}
@@ -101,7 +101,7 @@ func TestExecutorRunsModelToolLoopThroughSandboxAndPermissionGate(t *testing.T) 
 			if part == nil {
 				continue
 			}
-			if part.FunctionResponse != nil && part.FunctionResponse.Name == "workspace.read" {
+			if part.FunctionResponse != nil && part.FunctionResponse.Name == "workspace_read_7719d3f4" {
 				sawToolResponse = true
 			}
 			if part.Text == "closed-loop-complete" {

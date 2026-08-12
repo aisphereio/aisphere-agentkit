@@ -4,6 +4,7 @@
 package runtimeplan
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"maps"
 	"strings"
@@ -81,6 +82,48 @@ type ToolBinding struct {
 	TimeoutMillis    int64                  `json:"timeoutMillis,omitempty"`
 	Retry            map[string]interface{} `json:"retry,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ModelSafeToolName adapts a canonical Hub Tool id to the function-name
+// grammar shared by OpenAI-compatible model APIs. Catalog ids deliberately use
+// dotted namespaces (for example workspace.write), while model function names
+// only accept ASCII letters, digits, underscores, and hyphens. The executor
+// keeps the canonical id separately and uses this value only at the model
+// boundary.
+func ModelSafeToolName(name string) string {
+	original := strings.TrimSpace(name)
+	if original == "" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.Grow(len(original))
+	lastUnderscore := false
+	for _, char := range original {
+		valid := char >= 'a' && char <= 'z' ||
+			char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' || char == '_' || char == '-'
+		if valid {
+			builder.WriteRune(char)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			builder.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	adapted := builder.String()
+	if adapted == "" {
+		adapted = "tool"
+	}
+	if adapted == original && len(adapted) <= 64 {
+		return adapted
+	}
+	digest := sha256.Sum256([]byte(original))
+	if len(adapted) > 55 {
+		adapted = adapted[:55]
+	}
+	return fmt.Sprintf("%s_%x", adapted, digest[:4])
 }
 
 type MCPBinding struct {

@@ -68,14 +68,14 @@ type sandboxTool struct {
 // RuntimeName may still override the catalog id; typed Tool V1 will source this
 // from ModelContract.Name instead.
 func (t *sandboxTool) Name() string {
-	return firstNonEmpty(t.binding.RuntimeName, t.binding.Name)
+	return runtimeplan.ModelSafeToolName(firstNonEmpty(t.binding.RuntimeName, t.binding.Name))
 }
 
 // executorCapability is the Sandbox-local primitive that actually performs the
 // action. It must not be conflated with the model-facing Tool name. For example:
 //
-//   model Tool: skill.pull
-//   capability: git.fetch
+//	model Tool: skill.pull
+//	capability: git.fetch
 //
 // Legacy workspace/browser snapshots have no explicit capability and continue
 // to use the catalog Tool id as a compatibility fallback.
@@ -142,16 +142,17 @@ func (t *sandboxTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		RunID:         runID,
 		TimeoutMillis: t.binding.TimeoutMillis,
 		Metadata: map[string]interface{}{
-			"runtimeType":       "sandbox",
-			"toolId":            t.binding.Name,
-			"modelToolName":     t.Name(),
+			"runtimeType":        "sandbox",
+			"toolId":             t.binding.Name,
+			"modelToolName":      t.Name(),
+			"canonicalToolName":  t.binding.Name,
 			"executorCapability": capability,
-			"toolVersion":       t.binding.Version,
-			"toolRevision":      t.binding.Revision,
-			"capabilities":      t.binding.Capabilities,
-			"permissions":       t.binding.Permissions,
-			"snapshotId":        t.snapshotID,
-			"sessionId":         t.sessionID,
+			"toolVersion":        t.binding.Version,
+			"toolRevision":       t.binding.Revision,
+			"capabilities":       t.binding.Capabilities,
+			"permissions":        t.binding.Permissions,
+			"snapshotId":         t.snapshotID,
+			"sessionId":          t.sessionID,
 		},
 	})
 	if err != nil {

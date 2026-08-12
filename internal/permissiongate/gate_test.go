@@ -13,6 +13,13 @@ func TestGateAllowsSnapshotTool(t *testing.T) {
 	}
 }
 
+func TestGateAllowsModelSafeAliasForNamespacedSnapshotTool(t *testing.T) {
+	gate := New(&runtimeplan.RuntimePlan{Tools: []runtimeplan.ToolBinding{{Name: "workspace.write", ApprovalMode: "always", Approved: true}}})
+	if decision := gate.Check("workspace_write_8ea1c313"); !decision.Allowed || decision.Tool.Name != "workspace.write" {
+		t.Fatalf("unexpected decision: %+v", decision)
+	}
+}
+
 func TestGateDeniesToolOutsideSnapshot(t *testing.T) {
 	gate := New(&runtimeplan.RuntimePlan{Tools: []runtimeplan.ToolBinding{{Name: "workspace.read"}}})
 	decision := gate.Check("workspace.write")
