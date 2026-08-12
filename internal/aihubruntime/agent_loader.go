@@ -23,10 +23,11 @@ import (
 	"strings"
 	"sync"
 
+	"gopkg.in/yaml.v3"
+
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/internal/configurable"
 	"google.golang.org/adk/internal/runtimeconfig"
-	"gopkg.in/yaml.v3"
 )
 
 // SessionAgentLoader materializes only the Hub snapshot that was authorized
@@ -53,7 +54,7 @@ func (l *SessionAgentLoader) ListAgents() []string { return nil }
 func (l *SessionAgentLoader) HubManaged() bool { return true }
 
 func (l *SessionAgentLoader) LoadAgent(name string) (agent.Agent, error) {
-	return nil, fmt.Errorf("Hub agents require request-scoped loading")
+	return nil, fmt.Errorf("hub agents require request-scoped loading")
 }
 
 func (l *SessionAgentLoader) RootAgent() agent.Agent { return nil }
@@ -79,7 +80,7 @@ func (l *SessionAgentLoader) LoadAgentForRequest(ctx context.Context, name, sess
 		return nil, err
 	}
 	if snapshot.AgentID == "" || snapshot.AgentVersion == "" {
-		return nil, fmt.Errorf("Hub returned an incomplete agent snapshot")
+		return nil, fmt.Errorf("hub returned an incomplete agent snapshot")
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()

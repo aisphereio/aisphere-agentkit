@@ -15,8 +15,11 @@
 package aihubruntime
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -246,7 +249,7 @@ func TestPrepareAgentSnapshotSkillRootUsesPinnedCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cache, "references", "guide.md"), []byte("guide"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &AgentSnapshot{SnapshotID: "snap-1", SessionID: "session-1", Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", CachePath: cache}}}
+	snapshot := &AgentSnapshot{SnapshotID: "snap-1", SessionID: "session-1", Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", Source: "catalog", CachePath: cache}}}
 	got, err := PrepareAgentSnapshotSkillRoot(root, snapshot)
 	if err != nil {
 		t.Fatalf("PrepareAgentSnapshotSkillRoot() error = %v", err)
@@ -257,4 +260,93 @@ func TestPrepareAgentSnapshotSkillRootUsesPinnedCache(t *testing.T) {
 	if snapshot.Skills[0].MountPath == "" {
 		t.Fatal("snapshot skill mount path is empty")
 	}
+}
+
+func TestCacheAgentSnapshotSkillsRejectsCatalogWithoutPackageURL(t *testing.T) {
+	client := &Client{cfg: runtimeconfig.AIHubSkillConfig{Enabled: true}}
+	snapshot := &AgentSnapshot{Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", Source: "catalog"}}}
+	err := client.CacheAgentSnapshotSkills(context.Background(), t.TempDir(), snapshot)
+	if got := SkillFailureCode(err); got != CodeSkillPackageURLRequired {
+		t.Fatalf("SkillFailureCode() = %q, error=%v", got, err)
+	}
+}
+
+func TestCacheAgentSnapshotSkillsRejectsUnknownSource(t *testing.T) {
+	client := &Client{cfg: runtimeconfig.AIHubSkillConfig{Enabled: true}}
+	snapshot := &AgentSnapshot{Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", Source: "mystery"}}}
+	err := client.CacheAgentSnapshotSkills(context.Background(), t.TempDir(), snapshot)
+	if got := SkillFailureCode(err); got != CodeSkillMaterializeFailed {
+		t.Fatalf("SkillFailureCode() = %q, error=%v", got, err)
+	}
+}
+
+func TestCacheAgentSnapshotSkillsClassifiesDownloadDigestAndUnpackFailures(t *testing.T) {
+	goodZip := skillZip(t, map[string]string{"SKILL.md": "---\nname: demo\ndescription: Demo\n---\n# Demo\n"})
+	tests := []struct {
+		name     string
+		status   int
+		body     []byte
+		digest   string
+		wantCode string
+	}{
+		{name: "download", status: http.StatusBadGateway, body: []byte("bad gateway"), wantCode: CodeSkillPackageDownloadFailed},
+		{name: "digest", status: http.StatusOK, body: goodZip, digest: "deadbeef", wantCode: CodeSkillPackageDigestMismatch},
+		{name: "unpack", status: http.StatusOK, body: []byte("not a zip"), wantCode: CodeSkillPackageUnpackFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write(tt.body)
+			}))
+			defer server.Close()
+			client, err := New(runtimeconfig.AIHubSkillConfig{Enabled: true, Endpoint: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := &AgentSnapshot{Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", Source: "catalog", DownloadURL: "/skill.zip", SHA256: tt.digest}}}
+			err = client.CacheAgentSnapshotSkills(context.Background(), t.TempDir(), snapshot)
+			if got := SkillFailureCode(err); got != tt.wantCode {
+				t.Fatalf("SkillFailureCode() = %q, want %q; error=%v", got, tt.wantCode, err)
+			}
+		})
+	}
+}
+
+func TestPrepareAgentSnapshotSkillRootFailsClosedOnSource(t *testing.T) {
+	for _, source := range []string{"", "mystery"} {
+		t.Run(source, func(t *testing.T) {
+			_, err := PrepareAgentSnapshotSkillRoot(t.TempDir(), &AgentSnapshot{SessionID: "s", Skills: []SkillSnapshotItem{{Name: "demo", Version: "v1", Source: source}}})
+			if got := SkillFailureCode(err); got != CodeSkillMaterializeFailed {
+				t.Fatalf("SkillFailureCode() = %q, error=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestSkillRuntimeErrorSupportsErrorsAs(t *testing.T) {
+	err := skillRuntimeError(CodeSkillPackageDownloadFailed, errors.New("network"))
+	var target *SkillRuntimeError
+	if !errors.As(err, &target) || target.Code != CodeSkillPackageDownloadFailed {
+		t.Fatalf("typed error was not preserved: %v", err)
+	}
+}
+
+func skillZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	zw := zip.NewWriter(&buffer)
+	for name, content := range files {
+		entry, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }

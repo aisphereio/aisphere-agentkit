@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package runtimeexecutor runs Hub-authorized RuntimePlans through ADK-Go.
 package runtimeexecutor
 
@@ -12,6 +26,7 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/internal/agentassembler"
+	"google.golang.org/adk/internal/aihubruntime"
 	"google.golang.org/adk/internal/permissiongate"
 	"google.golang.org/adk/internal/runtimeplan"
 	"google.golang.org/adk/internal/toolruntime"
@@ -83,6 +98,9 @@ func responseErrorMessage(response map[string]any) string {
 }
 
 func FailureCode(err error) string {
+	if code := aihubruntime.SkillFailureCode(err); code != "" {
+		return code
+	}
 	switch {
 	case errors.Is(err, permissiongate.ErrToolDenied):
 		return "TOOL_AUTHORIZATION_DENIED"

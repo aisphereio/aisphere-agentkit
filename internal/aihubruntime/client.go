@@ -44,8 +44,10 @@ type Client struct {
 	httpClient *http.Client
 }
 
-type cookieHeaderContextKey struct{}
-type requestHeadersContextKey struct{}
+type (
+	cookieHeaderContextKey   struct{}
+	requestHeadersContextKey struct{}
+)
 
 var forwardedPrincipalHeaders = []string{
 	// Hub production authn verifies this signed principal token. Runtime must
@@ -650,12 +652,20 @@ func (c *Client) CacheAgentSnapshotSkills(ctx context.Context, root string, snap
 		return fmt.Errorf("skill cache root is required")
 	}
 	for i := range snapshot.Skills {
-		// Built-in skills are part of the immutable worker image. Their
-		// snapshot reference is still passed to the worker so the worker can
-		// select the matching directory and expose its SKILL.md to the model,
-		// but there is no Hub download to cache in Runtime.
-		if strings.TrimSpace(snapshot.Skills[i].DownloadURL) == "" && strings.TrimSpace(snapshot.Skills[i].CachePath) == "" {
+		item := &snapshot.Skills[i]
+		switch strings.ToLower(strings.TrimSpace(item.Source)) {
+		case "builtin":
+			// Built-ins are packaged with the immutable Runtime image. CachePath
+			// may be supplied explicitly for tests or alternate images.
 			continue
+		case "catalog":
+			if strings.TrimSpace(item.DownloadURL) == "" && strings.TrimSpace(item.CachePath) == "" {
+				return skillRuntimeError(CodeSkillPackageURLRequired, fmt.Errorf("catalog skill %s@%s has no package URL", item.Name, item.Version))
+			}
+		case "":
+			return skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("skill %s@%s has no source", item.Name, item.Version))
+		default:
+			return skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("skill %s@%s has unsupported source %q", item.Name, item.Version, item.Source))
 		}
 		if _, err := c.ensureCached(ctx, root, &snapshot.Skills[i]); err != nil {
 			return fmt.Errorf("cache skill %s@%s: %w", snapshot.Skills[i].Name, snapshot.Skills[i].Version, err)
@@ -688,12 +698,25 @@ func PrepareAgentSnapshotSkillRoot(root string, snapshot *AgentSnapshot) (string
 		if name == "" {
 			continue
 		}
-		source := strings.TrimSpace(item.CachePath)
-		if source == "" {
-			source = filepath.Join(root, safePath(name))
+		var source string
+		switch strings.ToLower(strings.TrimSpace(item.Source)) {
+		case "builtin":
+			source = strings.TrimSpace(item.CachePath)
+			if source == "" {
+				source = filepath.Join(root, safePath(name))
+			}
+		case "catalog":
+			source = strings.TrimSpace(item.CachePath)
+			if source == "" {
+				return "", skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("catalog skill %s@%s is not cached", name, item.Version))
+			}
+		case "":
+			return "", skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("skill %s@%s has no source", name, item.Version))
+		default:
+			return "", skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("skill %s@%s has unsupported source %q", name, item.Version, item.Source))
 		}
 		if _, err := os.Stat(filepath.Join(source, skillservice.SkillFileName)); err != nil {
-			return "", fmt.Errorf("skill %s@%s is not materialized at %s: %w", name, item.Version, source, err)
+			return "", skillRuntimeError(CodeSkillMaterializeFailed, fmt.Errorf("skill %s@%s is not materialized at %s: %w", name, item.Version, source, err))
 		}
 		target := filepath.Join(destination, safePath(name))
 		tmp := target + ".tmp"
@@ -862,9 +885,16 @@ func (c *Client) snapshotFromRefs(skillset, revision, snapshotID, generatedAt, s
 	skills := make([]SkillSnapshotItem, 0, len(refs))
 	for _, ref := range refs {
 		version := firstNonEmpty(ref.Version, "latest")
+		source := strings.ToLower(strings.TrimSpace(ref.Source))
+		if source == "" {
+			// Legacy discovery contracts only returned catalog package fields.
+			// Normalize that transport shape once; execution paths still switch
+			// exclusively on the explicit Source field.
+			source = "catalog"
+		}
 		item := SkillSnapshotItem{
 			Name: ref.Name, Version: version, Revision: ref.Revision,
-			Source: ref.Source, Object: firstNonEmpty(ref.Object, "aihub:skill:"+ref.Name),
+			Source: source, Object: firstNonEmpty(ref.Object, "aihub:skill:"+ref.Name),
 			CommitSHA: ref.CommitSHA, TreeSHA: ref.TreeSHA, ManifestSHA256: ref.ManifestSHA256,
 			ViaSkillSet: ref.ViaSkillSet, SHA256: ref.SHA256, MD5: ref.MD5, Size: ref.Size,
 			DownloadURL: ref.DownloadURL, MountPath: filepath.ToSlash(filepath.Join(ref.Name)),
@@ -908,23 +938,23 @@ func (c *Client) ensureCached(ctx context.Context, root string, item *SkillSnaps
 	}
 	data, err := c.download(ctx, item.DownloadURL)
 	if err != nil {
-		return false, err
+		return false, skillRuntimeError(CodeSkillPackageDownloadFailed, err)
 	}
 	if item.SHA256 != "" && sha256Hex(data) != strings.TrimPrefix(item.SHA256, "sha256:") {
-		return false, fmt.Errorf("sha256 mismatch")
+		return false, skillRuntimeError(CodeSkillPackageDigestMismatch, fmt.Errorf("sha256 mismatch"))
 	}
 	tmp := versionDir + ".tmp"
 	_ = os.RemoveAll(tmp)
 	if err := unzipSkillPackage(data, tmp); err != nil {
 		_ = os.RemoveAll(tmp)
-		return false, err
+		return false, skillRuntimeError(CodeSkillPackageUnpackFailed, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(versionDir), 0o755); err != nil {
-		return false, err
+		return false, skillRuntimeError(CodeSkillMaterializeFailed, err)
 	}
 	_ = os.RemoveAll(versionDir)
 	if err := os.Rename(tmp, versionDir); err != nil {
-		return false, err
+		return false, skillRuntimeError(CodeSkillMaterializeFailed, err)
 	}
 	item.CachePath = versionDir
 	b, _ := json.MarshalIndent(item, "", "  ")
@@ -1059,7 +1089,7 @@ func (c *Client) download(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("download %s failed: http=%d body=%s", rawURL, resp.StatusCode, string(b))
@@ -1082,7 +1112,7 @@ func (c *Client) doJSON(ctx context.Context, method, rawPath string, body io.Rea
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return err
@@ -1164,6 +1194,7 @@ func (c *Client) resolveURL(raw string) string {
 	}
 	return c.cfg.Endpoint + raw
 }
+
 func (c *Client) runtimeID() string {
 	if strings.TrimSpace(c.cfg.RuntimeID) != "" {
 		return strings.TrimSpace(c.cfg.RuntimeID)
@@ -1174,6 +1205,7 @@ func (c *Client) runtimeID() string {
 	}
 	return "runtime:local"
 }
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -1182,6 +1214,7 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
 func safePath(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "/", "_")
