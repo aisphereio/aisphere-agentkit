@@ -171,17 +171,19 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(lease.ToolsEndpoint) == "" {
-		timeout := m.ReadyTimeout
-		if timeout <= 0 {
-			timeout = 90 * time.Second
-		}
-		waitCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		lease, err = m.Sandbox.WaitReady(waitCtx, lease.SandboxID, 2*time.Second)
-		if err != nil {
-			return nil, err
-		}
+	timeout := m.ReadyTimeout
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// The Agent Sandbox controller may publish a Service name in the initial
+	// ensure response before EndpointSlice DNS and the tool server are reachable.
+	// Always perform an active readiness check; accepting a syntactically present
+	// toolsEndpoint produces a lease that fails on the first real tool call.
+	lease, err = m.waitSandboxToolsReady(waitCtx, lease.SandboxID, 2*time.Second)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(lease.ToolsEndpoint) == "" {
 		return nil, fmt.Errorf("sandbox %s has no executor tools endpoint", lease.SandboxID)
@@ -206,13 +208,13 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	out := &SessionLease{
-		SessionID: req.SessionID,
-		AgentID: agentID,
+		SessionID:  req.SessionID,
+		AgentID:    agentID,
 		SnapshotID: snapshotID,
-		Profile: profile,
-		Sandbox: lease,
-		Plan: plan,
-		SkillRoot: skillRoot,
+		Profile:    profile,
+		Sandbox:    lease,
+		Plan:       plan,
+		SkillRoot:  skillRoot,
 	}
 	m.mu.Lock()
 	if m.leases == nil {
@@ -221,6 +223,35 @@ func (m *Manager) EnsureSession(ctx context.Context, req CreateSessionRequest) (
 	m.leases[key] = out
 	m.mu.Unlock()
 	return out, nil
+}
+
+func (m *Manager) waitSandboxToolsReady(ctx context.Context, sandboxID string, interval time.Duration) (*sandboxclient.Lease, error) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		lease, err := m.Sandbox.Get(ctx, sandboxID)
+		if err == nil && (strings.EqualFold(lease.Phase, "ready") || strings.EqualFold(lease.Phase, "running")) && strings.TrimSpace(lease.ToolsEndpoint) != "" {
+			if _, probeErr := m.Sandbox.ListTools(ctx, sandboxID); probeErr == nil {
+				return lease, nil
+			} else {
+				lastErr = probeErr
+			}
+		} else if err != nil {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return nil, fmt.Errorf("sandbox %s tools did not become ready: %w", sandboxID, lastErr)
+			}
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func toolDescription(item aihubruntime.ToolSnapshotItem) string {
@@ -338,10 +369,10 @@ func (m *Manager) ToolRegistryForLease(lease *SessionLease) (*toolruntime.Regist
 	}
 	registry := toolruntime.New()
 	if err := registry.Register("sandbox", sandboxruntime.Resolver{
-		Caller: m.Sandbox,
-		SandboxID: lease.Sandbox.SandboxID,
+		Caller:     m.Sandbox,
+		SandboxID:  lease.Sandbox.SandboxID,
 		SnapshotID: lease.SnapshotID,
-		SessionID: lease.SessionID,
+		SessionID:  lease.SessionID,
 	}); err != nil {
 		return nil, err
 	}

@@ -21,7 +21,10 @@ import (
 	"google.golang.org/adk/tool"
 )
 
-var ErrSkillContextToolFailed = errors.New("skill context tool failed")
+var (
+	ErrSkillContextToolFailed = errors.New("skill context tool failed")
+	ErrToolExecutionFailed    = errors.New("tool execution failed")
+)
 
 // EventError turns non-transport failures embedded in ADK events into Runtime
 // execution failures. ADK intentionally feeds function errors back to the LLM,
@@ -54,6 +57,8 @@ func EventError(event *session.Event) error {
 		switch strings.TrimSpace(part.FunctionResponse.Name) {
 		case "list_skills", "load_skill", "load_skill_resource":
 			return fmt.Errorf("%w: %s: %s", ErrSkillContextToolFailed, part.FunctionResponse.Name, responseError)
+		default:
+			return fmt.Errorf("%w: %s: %s", ErrToolExecutionFailed, part.FunctionResponse.Name, responseError)
 		}
 	}
 	return nil
@@ -83,6 +88,8 @@ func FailureCode(err error) string {
 		return "TOOL_AUTHORIZATION_DENIED"
 	case errors.Is(err, ErrSkillContextToolFailed):
 		return "SKILL_CONTEXT_TOOL_FAILED"
+	case errors.Is(err, ErrToolExecutionFailed):
+		return "TOOL_EXECUTION_FAILED"
 	default:
 		return "AGENT_RUN_FAILED"
 	}

@@ -3,6 +3,7 @@ package sessionnative
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/adk/internal/aihubruntime"
@@ -12,10 +13,14 @@ import (
 
 func TestEnsureSessionAcceptsToolsEndpointWithoutWorker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/sandboxes/ensure" {
+		switch r.URL.Path {
+		case "/v1/sandboxes/ensure", "/v1/sandboxes/sandbox-1":
+			_, _ = w.Write([]byte(`{"sandboxId":"sandbox-1","phase":"ready","toolsEndpoint":"http://sandbox-tools"}`))
+		case "/v1/sandboxes/sandbox-1/tools":
+			_, _ = w.Write([]byte(`{"sandboxId":"sandbox-1","tools":[]}`))
+		default:
 			t.Fatalf("path = %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"sandboxId":"sandbox-1","phase":"ready","toolsEndpoint":"http://sandbox-tools"}`))
 	}))
 	defer server.Close()
 
@@ -42,6 +47,10 @@ func TestEnsureSessionCanBootstrapBeforeHubApprovalResolve(t *testing.T) {
 		t.Fatalf("create Hub client: %v", err)
 	}
 	sandboxServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/tools") {
+			_, _ = w.Write([]byte(`{"sandboxId":"sandbox-1","tools":[]}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"sandboxId":"sandbox-1","phase":"ready","toolsEndpoint":"http://sandbox-tools"}`))
 	}))
 	defer sandboxServer.Close()

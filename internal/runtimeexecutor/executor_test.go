@@ -192,6 +192,11 @@ func TestRuntimeExecutionErrorDetectsDeniedToolAndSkillLoadFailures(t *testing.T
 			toolName: "load_skill",
 			response: map[string]any{"error": "load instructions for skill release-notes: file missing"},
 		},
+		{
+			name:     "sandbox tool execution failure",
+			toolName: "workspace_write_8ea1c313",
+			response: map[string]any{"error": "sandbox tool endpoint is unavailable"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,6 +206,8 @@ func TestRuntimeExecutionErrorDetectsDeniedToolAndSkillLoadFailures(t *testing.T
 			}}}
 			if err := EventError(event); err == nil {
 				t.Fatal("EventError() = nil, want failure")
+			} else if tc.name == "sandbox tool execution failure" && FailureCode(err) != "TOOL_EXECUTION_FAILED" {
+				t.Fatalf("FailureCode() = %q, want TOOL_EXECUTION_FAILED", FailureCode(err))
 			}
 		})
 	}
