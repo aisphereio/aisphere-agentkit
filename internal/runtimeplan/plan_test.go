@@ -73,3 +73,38 @@ func TestFromSnapshotRequiresPinnedEntrypoint(t *testing.T) {
 		t.Fatal("FromSnapshot() error = nil, want error")
 	}
 }
+
+func TestFromSnapshotNormalizesLegacyGoMarshaledToolDefinition(t *testing.T) {
+	plan, err := FromSnapshot(&aihubruntime.AgentSnapshot{
+		SnapshotID: "snap-legacy-tool", AgentID: "agent-1",
+		Definition: aihubruntime.AgentDefinition{
+			EntryPoint: "root_agent.yaml",
+			Files:      map[string]string{"root_agent.yaml": "name: agent-1\n"},
+		},
+		Tools: []aihubruntime.ToolSnapshotItem{{
+			Name: "workspace.write", Version: "builtin-v1",
+			Runtime: map[string]interface{}{
+				"Type": "builtin", "Name": "workspace.write", "Description": "Write a workspace file",
+			},
+			Execution: map[string]interface{}{
+				"Placement": "sandbox", "Capabilities": []any{"sandbox:write"},
+			},
+		}},
+		Authorization: map[string]any{"tools": []any{map[string]any{
+			"tool": "workspace.write", "approvalMode": "always", "approved": true,
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("FromSnapshot() error = %v", err)
+	}
+	if len(plan.Tools) != 1 {
+		t.Fatalf("tools = %+v", plan.Tools)
+	}
+	got := plan.Tools[0]
+	if got.RuntimeType != "builtin" || got.RuntimeName != "workspace.write" || got.Execution["placement"] != "sandbox" {
+		t.Fatalf("legacy ToolDefinition was not normalized: %+v", got)
+	}
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "sandbox:write" {
+		t.Fatalf("capabilities = %+v", got.Capabilities)
+	}
+}

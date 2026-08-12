@@ -225,29 +225,63 @@ func sourceFromSkill(item aihubruntime.SkillSnapshotItem) string {
 func convertTool(item aihubruntime.ToolSnapshotItem, auth AuthorizationSpec) ToolBinding {
 	name := strings.TrimSpace(item.Name)
 	approval := auth.ApprovalFor(name)
-	runtimeType := stringFromMap(item.Runtime, "type")
+	runtimeSpec := normalizeToolContractMap(item.Runtime)
+	executionSpec := normalizeToolContractMap(item.Execution)
+	metadata := normalizeToolContractMap(item.Metadata)
+	runtimeType := stringFromMap(runtimeSpec, "type")
 	if runtimeType == "" {
-		runtimeType = stringFromMap(item.Execution, "runtime")
+		runtimeType = stringFromMap(executionSpec, "runtime")
 	}
 	if runtimeType == "" {
-		runtimeType = stringFromMap(item.Execution, "type")
+		runtimeType = stringFromMap(executionSpec, "type")
 	}
-	capabilities := stringSliceFromMap(item.Execution, "capabilities")
+	capabilities := stringSliceFromMap(executionSpec, "capabilities")
 	if len(capabilities) == 0 && len(approval.Capabilities) > 0 {
 		capabilities = append(capabilities, approval.Capabilities...)
 	}
-	approvalMode := firstNonEmpty(approval.ApprovalMode, stringFromMap(item.Runtime, "approvalMode"), stringFromMap(item.Metadata, "approvalMode"))
-	runtimeName := firstNonEmpty(stringFromMap(item.Runtime, "name"), stringFromMap(item.Execution, "name"), name)
+	approvalMode := firstNonEmpty(approval.ApprovalMode, stringFromMap(runtimeSpec, "approvalMode"), stringFromMap(metadata, "approvalMode"))
+	runtimeName := firstNonEmpty(stringFromMap(runtimeSpec, "name"), stringFromMap(executionSpec, "name"), name)
 	return ToolBinding{
 		Name: name, RuntimeName: runtimeName, Version: item.Version, Revision: item.Revision, Object: item.Object,
 		Status: item.Status, RuntimeType: runtimeType, ApprovalMode: approvalMode,
 		Required: approval.Required, Approved: approval.Approved,
 		RequiresApproval: approvalMode == "per_run" && !approval.Approved,
 		Capabilities:     capabilities, Permissions: approval.Permissions,
-		Runtime: maps.Clone(item.Runtime), Execution: maps.Clone(item.Execution),
+		Runtime: runtimeSpec, Execution: executionSpec,
 		InputSchema: maps.Clone(item.InputSchema), OutputSchema: maps.Clone(item.OutputSchema),
-		TimeoutMillis: item.TimeoutMillis, Retry: maps.Clone(item.Retry), Metadata: maps.Clone(item.Metadata),
+		TimeoutMillis: item.TimeoutMillis, Retry: maps.Clone(item.Retry), Metadata: metadata,
 	}
+}
+
+// normalizeToolContractMap adapts legacy Hub ToolDefinition JSON produced from
+// Go structs without json tags (for example Runtime.Type and
+// Execution.Placement) to the lower-camel contract consumed by Runtime. Old
+// immutable builtin Tool versions remain runnable while new typed contracts
+// already pass through unchanged.
+func normalizeToolContractMap(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	canonical := []string{
+		"type", "server", "name", "url", "method", "package", "entryPoint",
+		"headers", "config", "credentialRef", "description", "approvalMode",
+		"capability", "executorCapability", "transport", "toolFilter",
+		"placement", "runner", "image", "command", "args", "workingDir",
+		"filesystem", "network", "mounts", "env", "secretRefs", "allowHosts",
+		"denyHosts", "resources", "capabilities", "runtime", "longRunning",
+	}
+	out := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		normalized := key
+		for _, candidate := range canonical {
+			if strings.EqualFold(key, candidate) {
+				normalized = candidate
+				break
+			}
+		}
+		out[normalized] = value
+	}
+	return out
 }
 
 func convertMCPServers(tools []ToolBinding) []MCPBinding {
